@@ -1,8 +1,10 @@
 import {
   CollectionIcon,
   EditIcon,
+  PadlockIcon,
   PlusIcon,
   StarredIcon,
+  TrashIcon,
   UnstarredIcon,
 } from "outline-icons";
 import * as React from "react";
@@ -10,17 +12,20 @@ import stores from "~/stores";
 import Collection from "~/models/Collection";
 import CollectionEdit from "~/scenes/CollectionEdit";
 import CollectionNew from "~/scenes/CollectionNew";
-import DynamicCollectionIcon from "~/components/CollectionIcon";
+import CollectionPermissions from "~/scenes/CollectionPermissions";
+import CollectionDeleteDialog from "~/components/CollectionDeleteDialog";
+import DynamicCollectionIcon from "~/components/Icons/CollectionIcon";
 import { createAction } from "~/actions";
 import { CollectionSection } from "~/actions/sections";
 import history from "~/utils/history";
 
-const ColorCollectionIcon = ({ collection }: { collection: Collection }) => {
-  return <DynamicCollectionIcon collection={collection} />;
-};
+const ColorCollectionIcon = ({ collection }: { collection: Collection }) => (
+  <DynamicCollectionIcon collection={collection} />
+);
 
 export const openCollection = createAction({
   name: ({ t }) => t("Open collection"),
+  analyticsName: "Open collection",
   section: CollectionSection,
   shortcut: ["o", "c"],
   icon: <CollectionIcon />,
@@ -40,6 +45,7 @@ export const openCollection = createAction({
 
 export const createCollection = createAction({
   name: ({ t }) => t("New collection"),
+  analyticsName: "New collection",
   section: CollectionSection,
   icon: <PlusIcon />,
   keywords: "create",
@@ -56,7 +62,9 @@ export const createCollection = createAction({
 });
 
 export const editCollection = createAction({
-  name: ({ t }) => t("Edit collection"),
+  name: ({ t, isContextMenu }) =>
+    isContextMenu ? `${t("Edit")}…` : t("Edit collection"),
+  analyticsName: "Edit collection",
   section: CollectionSection,
   icon: <EditIcon />,
   visible: ({ stores, activeCollectionId }) =>
@@ -79,8 +87,30 @@ export const editCollection = createAction({
   },
 });
 
+export const editCollectionPermissions = createAction({
+  name: ({ t, isContextMenu }) =>
+    isContextMenu ? `${t("Permissions")}…` : t("Collection permissions"),
+  analyticsName: "Collection permissions",
+  section: CollectionSection,
+  icon: <PadlockIcon />,
+  visible: ({ stores, activeCollectionId }) =>
+    !!activeCollectionId &&
+    stores.policies.abilities(activeCollectionId).update,
+  perform: ({ t, activeCollectionId }) => {
+    if (!activeCollectionId) {
+      return;
+    }
+
+    stores.dialogs.openModal({
+      title: t("Collection permissions"),
+      content: <CollectionPermissions collectionId={activeCollectionId} />,
+    });
+  },
+});
+
 export const starCollection = createAction({
   name: ({ t }) => t("Star"),
+  analyticsName: "Star collection",
   section: CollectionSection,
   icon: <StarredIcon />,
   keywords: "favorite bookmark",
@@ -106,6 +136,7 @@ export const starCollection = createAction({
 
 export const unstarCollection = createAction({
   name: ({ t }) => t("Unstar"),
+  analyticsName: "Unstar collection",
   section: CollectionSection,
   icon: <UnstarredIcon />,
   keywords: "unfavorite unbookmark",
@@ -129,9 +160,44 @@ export const unstarCollection = createAction({
   },
 });
 
+export const deleteCollection = createAction({
+  name: ({ t }) => t("Delete"),
+  analyticsName: "Delete collection",
+  section: CollectionSection,
+  icon: <TrashIcon />,
+  visible: ({ activeCollectionId, stores }) => {
+    if (!activeCollectionId) {
+      return false;
+    }
+    return stores.policies.abilities(activeCollectionId).delete;
+  },
+  perform: ({ activeCollectionId, stores, t }) => {
+    if (!activeCollectionId) {
+      return;
+    }
+
+    const collection = stores.collections.get(activeCollectionId);
+    if (!collection) {
+      return;
+    }
+
+    stores.dialogs.openModal({
+      isCentered: true,
+      title: t("Delete collection"),
+      content: (
+        <CollectionDeleteDialog
+          collection={collection}
+          onSubmit={stores.dialogs.closeAllModals}
+        />
+      ),
+    });
+  },
+});
+
 export const rootCollectionActions = [
   openCollection,
   createCollection,
   starCollection,
   unstarCollection,
+  deleteCollection,
 ];

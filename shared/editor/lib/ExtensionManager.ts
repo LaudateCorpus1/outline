@@ -1,6 +1,6 @@
 import { PluginSimple } from "markdown-it";
 import { keymap } from "prosemirror-keymap";
-import { MarkdownParser, TokenConfig } from "prosemirror-markdown";
+import { MarkdownParser } from "prosemirror-markdown";
 import { Schema } from "prosemirror-model";
 import { EditorView } from "prosemirror-view";
 import { Editor } from "~/editor";
@@ -26,6 +26,7 @@ export default class ExtensionManager {
       let extension;
 
       if (typeof ext === "function") {
+        // @ts-expect-error We won't instantiate an abstract class
         extension = new ext(editor?.props);
       } else {
         extension = ext;
@@ -49,6 +50,31 @@ export default class ExtensionManager {
         }),
         {}
       );
+  }
+
+  get marks() {
+    const marks = this.extensions
+      .filter((extension) => extension.type === "mark")
+      .reduce(
+        (marks, mark: Mark) => ({
+          ...marks,
+          [mark.name]: mark.schema,
+        }),
+        {}
+      );
+
+    for (const i in marks) {
+      if (marks[i].excludes) {
+        // We must filter marks from the excludes list that are not defined
+        // in the schema for the current editor.
+        marks[i].excludes = marks[i].excludes
+          .split(" ")
+          .filter((m: string) => Object.keys(marks).includes(m))
+          .join(" ");
+      }
+    }
+
+    return marks;
   }
 
   serializer() {
@@ -84,35 +110,23 @@ export default class ExtensionManager {
     rules?: Record<string, any>;
     plugins?: PluginSimple[];
   }): MarkdownParser {
-    const tokens: Record<string, TokenConfig> = this.extensions
+    const tokens = this.extensions
       .filter(
         (extension) => extension.type === "mark" || extension.type === "node"
       )
       .reduce((nodes, extension: Node | Mark) => {
-        const md = extension.parseMarkdown();
-        if (!md) {
+        const parseSpec = extension.parseMarkdown();
+        if (!parseSpec) {
           return nodes;
         }
 
         return {
           ...nodes,
-          [extension.markdownToken || extension.name]: md,
+          [extension.markdownToken || extension.name]: parseSpec,
         };
       }, {});
 
     return new MarkdownParser(schema, makeRules({ rules, plugins }), tokens);
-  }
-
-  get marks() {
-    return this.extensions
-      .filter((extension) => extension.type === "mark")
-      .reduce(
-        (marks, { name, schema }: Mark) => ({
-          ...marks,
-          [name]: schema,
-        }),
-        {}
-      );
   }
 
   get plugins() {
@@ -191,7 +205,7 @@ export default class ExtensionManager {
           callback: CommandFactory,
           attrs: Record<string, any>
         ) => {
-          if (!view.editable) {
+          if (!view.editable && !extension.allowInReadOnly) {
             return false;
           }
           view.focus();
@@ -212,7 +226,7 @@ export default class ExtensionManager {
           Object.entries(value).forEach(([commandName, commandValue]) => {
             handle(commandName, commandValue);
           });
-        } else {
+        } else if (value) {
           handle(name, value);
         }
 

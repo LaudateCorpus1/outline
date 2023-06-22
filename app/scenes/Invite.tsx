@@ -4,7 +4,9 @@ import * as React from "react";
 import { useTranslation, Trans } from "react-i18next";
 import { Link } from "react-router-dom";
 import styled from "styled-components";
+import { s } from "@shared/styles";
 import { Role } from "@shared/types";
+import { UserValidation } from "@shared/validations";
 import Button from "~/components/Button";
 import CopyToClipboard from "~/components/CopyToClipboard";
 import Flex from "~/components/Flex";
@@ -18,8 +20,6 @@ import useCurrentUser from "~/hooks/useCurrentUser";
 import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";
 import useToasts from "~/hooks/useToasts";
-
-const MAX_INVITES = 20;
 
 type Props = {
   onSubmit: () => void;
@@ -57,7 +57,7 @@ function Invite({ onSubmit }: Props) {
   const team = useCurrentTeam();
   const { t } = useTranslation();
   const predictedDomain = user.email.split("@")[1];
-  const can = usePolicy(team.id);
+  const can = usePolicy(team);
 
   const handleSubmit = React.useCallback(
     async (ev: React.SyntheticEvent) => {
@@ -97,10 +97,10 @@ function Invite({ onSubmit }: Props) {
   }, []);
 
   const handleAdd = React.useCallback(() => {
-    if (invites.length >= MAX_INVITES) {
+    if (invites.length >= UserValidation.maxInvitesPerRequest) {
       showToast(
         t("Sorry, you can only send {{MAX_INVITES}} invites at a time", {
-          MAX_INVITES,
+          MAX_INVITES: UserValidation.maxInvitesPerRequest,
         }),
         {
           type: "warning",
@@ -151,7 +151,7 @@ function Invite({ onSubmit }: Props) {
       {team.guestSignin ? (
         <Text type="secondary">
           <Trans
-            defaults="Invite team members or guests to join your knowledge base. Team members can sign in with {{signinMethods}} or use their email address."
+            defaults="Invite members or guests to join your workspace. They can sign in with {{signinMethods}} or use their email address."
             values={{
               signinMethods: team.signinMethods,
             }}
@@ -160,7 +160,7 @@ function Invite({ onSubmit }: Props) {
       ) : (
         <Text type="secondary">
           <Trans
-            defaults="Invite team members to join your knowledge base. They will need to sign in with {{signinMethods}}."
+            defaults="Invite members to join your workspace. They will need to sign in with {{signinMethods}}."
             values={{
               signinMethods: team.signinMethods,
             }}
@@ -221,9 +221,10 @@ function Invite({ onSubmit }: Props) {
             onChange={(ev) => handleChange(ev, index)}
             value={invite.name}
             required={!!invite.email}
+            flex
           />
           <InputSelectRole
-            onChange={(role: any) => handleRoleChange(role as Role, index)}
+            onChange={(role: Role) => handleRoleChange(role, index)}
             value={invite.role}
             labelHidden={index !== 0}
             short
@@ -237,11 +238,16 @@ function Invite({ onSubmit }: Props) {
               </Tooltip>
             </Remove>
           )}
+          {index === 0 && invites.length > 1 && (
+            <Remove>
+              <Spacer />
+            </Remove>
+          )}
         </Flex>
       ))}
 
       <Flex justify="space-between">
-        {invites.length <= MAX_INVITES ? (
+        {invites.length <= UserValidation.maxInvitesPerRequest ? (
           <Button type="button" onClick={handleAdd} neutral>
             <Trans>Add another</Trans>…
           </Button>
@@ -267,15 +273,18 @@ function Invite({ onSubmit }: Props) {
 const CopyBlock = styled("div")`
   margin: 2em 0;
   font-size: 14px;
-  background: ${(props) => props.theme.secondaryBackground};
+  background: ${s("secondaryBackground")};
   border-radius: 8px;
   padding: 16px 16px 8px;
 `;
 
 const Remove = styled("div")`
-  margin-top: 6px;
-  position: absolute;
-  right: -32px;
+  margin-top: 4px;
+`;
+
+const Spacer = styled.div`
+  width: 24px;
+  height: 24px;
 `;
 
 export default observer(Invite);

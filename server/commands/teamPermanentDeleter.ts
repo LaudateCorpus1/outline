@@ -1,7 +1,7 @@
 import { Transaction } from "sequelize";
 import { sequelize } from "@server/database/sequelize";
-import Logger from "@server/logging/logger";
-import { APM } from "@server/logging/tracing";
+import Logger from "@server/logging/Logger";
+import { traceFunction } from "@server/logging/tracing";
 import {
   ApiKey,
   Attachment,
@@ -12,7 +12,6 @@ import {
   FileOperation,
   Group,
   Team,
-  NotificationSetting,
   User,
   UserAuthentication,
   Integration,
@@ -37,7 +36,7 @@ async function teamPermanentDeleter(team: Team) {
 
   try {
     transaction = await sequelize.transaction();
-    await Attachment.findAllInBatches(
+    await Attachment.findAllInBatches<Attachment>(
       {
         where: {
           teamId,
@@ -62,7 +61,7 @@ async function teamPermanentDeleter(team: Team) {
       }
     );
     // Destroy user-relation models
-    await User.findAllInBatches(
+    await User.findAllInBatches<User>(
       {
         attributes: ["id"],
         where: {
@@ -154,13 +153,6 @@ async function teamPermanentDeleter(team: Team) {
       force: true,
       transaction,
     });
-    await NotificationSetting.destroy({
-      where: {
-        teamId,
-      },
-      force: true,
-      transaction,
-    });
     await SearchQuery.destroy({
       where: {
         teamId,
@@ -169,13 +161,6 @@ async function teamPermanentDeleter(team: Team) {
       transaction,
     });
     await Share.destroy({
-      where: {
-        teamId,
-      },
-      force: true,
-      transaction,
-    });
-    await User.destroy({
       where: {
         teamId,
       },
@@ -205,7 +190,6 @@ async function teamPermanentDeleter(team: Team) {
   }
 }
 
-export default APM.traceFunction({
-  serviceName: "command",
+export default traceFunction({
   spanName: "teamPermanentDeleter",
 })(teamPermanentDeleter);

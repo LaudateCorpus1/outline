@@ -4,8 +4,8 @@ import { useTranslation } from "react-i18next";
 export default function useDictionary() {
   const { t } = useTranslation();
 
-  return React.useMemo(() => {
-    return {
+  return React.useMemo(
+    () => ({
       addColumnAfter: t("Insert column after"),
       addColumnBefore: t("Insert column before"),
       addRowAfter: t("Insert row after"),
@@ -13,11 +13,14 @@ export default function useDictionary() {
       alignCenter: t("Align center"),
       alignLeft: t("Align left"),
       alignRight: t("Align right"),
+      alignFullWidth: t("Full width"),
       bulletList: t("Bulleted list"),
       checkboxList: t("Todo list"),
       codeBlock: t("Code block"),
       codeCopied: t("Copied to clipboard"),
       codeInline: t("Code"),
+      comment: t("Comment"),
+      copy: t("Copy"),
       createLink: t("Create link"),
       createLinkError: t("Sorry, an error occurred creating the link"),
       createNewDoc: t("Create a new doc"),
@@ -27,9 +30,6 @@ export default function useDictionary() {
       deleteImage: t("Delete image"),
       downloadImage: t("Download image"),
       replaceImage: t("Replace image"),
-      alignImageLeft: t("Float left"),
-      alignImageRight: t("Float right"),
-      alignImageDefault: t("Center large"),
       em: t("Italic"),
       embedInvalidLink: t("Sorry, that link won’t work for this embed type"),
       file: t("File attachment"),
@@ -52,6 +52,7 @@ export default function useDictionary() {
       noResults: t("No results"),
       openLink: t("Open link"),
       goToLink: t("Go to link"),
+      openLinkError: t("Sorry, that type of link is not supported"),
       orderedList: t("Ordered list"),
       pageBreak: t("Page break"),
       pasteLink: `${t("Paste a link")}…`,
@@ -67,15 +68,24 @@ export default function useDictionary() {
       strong: t("Bold"),
       subheading: t("Subheading"),
       table: t("Table"),
+      mathInline: t("Math inline (LaTeX)"),
+      mathBlock: t("Math block (LaTeX)"),
       tip: t("Tip"),
       tipNotice: t("Tip notice"),
+      showDiagram: t("Show diagram"),
+      showSource: t("Show source"),
       warning: t("Warning"),
       warningNotice: t("Warning notice"),
+      success: t("Success"),
+      successNotice: t("Success notice"),
       insertDate: t("Current date"),
       insertTime: t("Current time"),
       insertDateTime: t("Current date and time"),
-    };
-  }, [t]);
+      indent: t("Indent"),
+      outdent: t("Outdent"),
+    }),
+    [t]
+  );
 }
 
 export type Dictionary = ReturnType<typeof useDictionary>;

@@ -1,5 +1,6 @@
-import { NodeSpec, Node as ProsemirrorNode, Schema } from "prosemirror-model";
-import { EditorState, Plugin, TextSelection } from "prosemirror-state";
+import { chainCommands } from "prosemirror-commands";
+import { NodeSpec, Node as ProsemirrorNode } from "prosemirror-model";
+import { Command, Plugin, TextSelection } from "prosemirror-state";
 import {
   addColumnAfter,
   addColumnBefore,
@@ -7,22 +8,19 @@ import {
   deleteRow,
   deleteTable,
   goToNextCell,
-  isInTable,
   tableEditing,
   toggleHeaderCell,
   toggleHeaderColumn,
   toggleHeaderRow,
 } from "prosemirror-tables";
-import {
-  addRowAt,
-  createTable,
-  getCellsInColumn,
-  moveRow,
-} from "prosemirror-utils";
 import { Decoration, DecorationSet } from "prosemirror-view";
+import {
+  addRowAfterAndMoveSelection,
+  setColumnAttr,
+  createTable,
+} from "../commands/table";
 import { MarkdownSerializerState } from "../lib/markdown/serializer";
 import tablesRule from "../rules/tables";
-import { Dispatch } from "../types";
 import Node from "./Node";
 
 export default class Table extends Node {
@@ -40,7 +38,7 @@ export default class Table extends Node {
       toDOM() {
         return [
           "div",
-          { class: "scrollable-wrapper" },
+          { class: "scrollable-wrapper table-wrapper" },
           [
             "div",
             { class: "scrollable" },
@@ -55,58 +53,32 @@ export default class Table extends Node {
     return [tablesRule];
   }
 
-  commands({ schema }: { schema: Schema }) {
+  commands() {
     return {
-      createTable: ({
-        rowsCount,
-        colsCount,
-      }: {
-        rowsCount: number;
-        colsCount: number;
-      }) => (state: EditorState, dispatch: Dispatch) => {
-        const offset = state.tr.selection.anchor + 1;
-        const nodes = createTable(schema, rowsCount, colsCount);
-        const tr = state.tr.replaceSelectionWith(nodes).scrollIntoView();
-        const resolvedPos = tr.doc.resolve(offset);
-
-        tr.setSelection(TextSelection.near(resolvedPos));
-        dispatch(tr);
-        return true;
-      },
-      setColumnAttr: ({
-        index,
-        alignment,
-      }: {
-        index: number;
-        alignment: string;
-      }) => (state: EditorState, dispatch: Dispatch) => {
-        const cells = getCellsInColumn(index)(state.selection) || [];
-        let transaction = state.tr;
-        cells.forEach(({ pos }) => {
-          transaction = transaction.setNodeMarkup(pos, undefined, {
-            alignment,
-          });
-        });
-        dispatch(transaction);
-        return true;
-      },
+      createTable:
+        ({
+          rowsCount,
+          colsCount,
+        }: {
+          rowsCount: number;
+          colsCount: number;
+        }): Command =>
+        (state, dispatch) => {
+          if (dispatch) {
+            const offset = state.tr.selection.anchor + 1;
+            const nodes = createTable(state, rowsCount, colsCount);
+            const tr = state.tr.replaceSelectionWith(nodes).scrollIntoView();
+            const resolvedPos = tr.doc.resolve(offset);
+            tr.setSelection(TextSelection.near(resolvedPos));
+            dispatch(tr);
+          }
+          return true;
+        },
+      setColumnAttr,
       addColumnBefore: () => addColumnBefore,
       addColumnAfter: () => addColumnAfter,
       deleteColumn: () => deleteColumn,
-      addRowAfter: ({ index }: { index: number }) => (
-        state: EditorState,
-        dispatch: Dispatch
-      ) => {
-        if (index === 0) {
-          // A little hack to avoid cloning the heading row by cloning the row
-          // beneath and then moving it to the right index.
-          const tr = addRowAt(index + 2, true)(state.tr);
-          dispatch(moveRow(index + 2, index + 1)(tr));
-        } else {
-          dispatch(addRowAt(index + 1, true)(state.tr));
-        }
-        return true;
-      },
+      addRowAfter: addRowAfterAndMoveSelection,
       deleteRow: () => deleteRow,
       deleteTable: () => deleteTable,
       toggleHeaderColumn: () => toggleHeaderColumn,
@@ -117,20 +89,9 @@ export default class Table extends Node {
 
   keys() {
     return {
-      Tab: goToNextCell(1),
+      Tab: chainCommands(goToNextCell(1), addRowAfterAndMoveSelection()),
       "Shift-Tab": goToNextCell(-1),
-      Enter: (state: EditorState, dispatch: Dispatch) => {
-        if (!isInTable(state)) {
-          return false;
-        }
-
-        // TODO: Adding row at the end for now, can we find the current cell
-        // row index and add the row below that?
-        const cells = getCellsInColumn(0)(state.selection) || [];
-
-        dispatch(addRowAt(cells.length, true)(state.tr));
-        return true;
-      },
+      Enter: addRowAfterAndMoveSelection(),
     };
   }
 

@@ -16,6 +16,7 @@ import InputSearch from "~/components/InputSearch";
 import Modal from "~/components/Modal";
 import Scene from "~/components/Scene";
 import Text from "~/components/Text";
+import env from "~/env";
 import useBoolean from "~/hooks/useBoolean";
 import useCurrentTeam from "~/hooks/useCurrentTeam";
 import usePolicy from "~/hooks/usePolicy";
@@ -27,11 +28,8 @@ import UserStatusFilter from "./components/UserStatusFilter";
 function Members() {
   const location = useLocation();
   const history = useHistory();
-  const [
-    inviteModalOpen,
-    handleInviteModalOpen,
-    handleInviteModalClose,
-  ] = useBoolean();
+  const [inviteModalOpen, handleInviteModalOpen, handleInviteModalClose] =
+    useBoolean();
   const team = useCurrentTeam();
   const { users } = useStores();
   const { t } = useTranslation();
@@ -40,7 +38,7 @@ function Members() {
   const [data, setData] = React.useState<User[]>([]);
   const [totalPages, setTotalPages] = React.useState(0);
   const [userIds, setUserIds] = React.useState<string[]>([]);
-  const can = usePolicy(team.id);
+  const can = usePolicy(team);
   const query = params.get("query") || "";
   const filter = params.get("filter") || "";
   const sort = params.get("sort") || "name";
@@ -71,7 +69,7 @@ function Members() {
     };
 
     fetchData();
-  }, [query, sort, filter, page, direction, users]);
+  }, [query, sort, filter, page, direction, users, users.counts.all]);
 
   React.useEffect(() => {
     let filtered = users.orderedData;
@@ -82,6 +80,8 @@ function Members() {
       filtered = users.orderedData.filter((u) => userIds.includes(u.id));
     } else if (filter === "admins") {
       filtered = users.admins.filter((u) => userIds.includes(u.id));
+    } else if (filter === "members") {
+      filtered = users.members.filter((u) => userIds.includes(u.id));
     } else if (filter === "suspended") {
       filtered = users.suspended.filter((u) => userIds.includes(u.id));
     } else if (filter === "invited") {
@@ -96,6 +96,7 @@ function Members() {
     filter,
     users.active,
     users.admins,
+    users.members,
     users.orderedData,
     users.suspended,
     users.invited,
@@ -139,10 +140,12 @@ function Members() {
     [params, history, location.pathname]
   );
 
+  const appName = env.APP_NAME;
+
   return (
     <Scene
       title={t("Members")}
-      icon={<UserIcon color="currentColor" />}
+      icon={<UserIcon />}
       actions={
         <>
           {can.inviteUser && (
@@ -165,9 +168,9 @@ function Members() {
       <Heading>{t("Members")}</Heading>
       <Text type="secondary">
         <Trans>
-          Everyone that has signed into Outline appears here. It’s possible that
-          there are other users who have access through {team.signinMethods} but
-          haven’t signed in yet.
+          Everyone that has signed into {{ appName }} is listed here. It’s
+          possible that there are other users who have access through{" "}
+          {team.signinMethods} but haven’t signed in yet.
         </Trans>
       </Text>
       <Flex gap={8}>

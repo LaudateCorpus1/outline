@@ -1,19 +1,25 @@
-import * as Sentry from "@sentry/react";
 import { observable } from "mobx";
 import { observer } from "mobx-react";
 import * as React from "react";
 import { withTranslation, Trans, WithTranslation } from "react-i18next";
 import styled from "styled-components";
-import { githubIssuesUrl } from "@shared/utils/urlHelpers";
+import { s } from "@shared/styles";
+import { githubIssuesUrl, feedbackUrl } from "@shared/utils/urlHelpers";
 import Button from "~/components/Button";
 import CenteredContent from "~/components/CenteredContent";
 import PageTitle from "~/components/PageTitle";
 import Text from "~/components/Text";
 import env from "~/env";
-import isHosted from "~/utils/isHosted";
+import Logger from "~/utils/Logger";
+import isCloudHosted from "~/utils/isCloudHosted";
 
 type Props = WithTranslation & {
+  /** Whether to reload the page if a chunk fails to load. */
   reloadOnChunkMissing?: boolean;
+  /** Whether to show a title heading. */
+  showTitle?: boolean;
+  /** The wrapping component to use. */
+  component?: React.ComponentType | string;
 };
 
 @observer
@@ -26,12 +32,11 @@ class ErrorBoundary extends React.Component<Props> {
 
   componentDidCatch(error: Error) {
     this.error = error;
-    console.error(error);
 
     if (
       this.props.reloadOnChunkMissing &&
       error.message &&
-      error.message.match(/chunk/)
+      error.message.match(/dynamically imported module/)
     ) {
       // If the editor bundle fails to load then reload the entire window. This
       // can happen if a deploy happens between the user loading the initial JS
@@ -40,9 +45,7 @@ class ErrorBoundary extends React.Component<Props> {
       return;
     }
 
-    if (env.SENTRY_DSN) {
-      Sentry.captureException(error);
-    }
+    Logger.error("ErrorBoundary", error);
   }
 
   handleReload = () => {
@@ -54,24 +57,31 @@ class ErrorBoundary extends React.Component<Props> {
   };
 
   handleReportBug = () => {
-    window.open(githubIssuesUrl());
+    window.open(isCloudHosted ? feedbackUrl() : githubIssuesUrl());
   };
 
   render() {
-    const { t } = this.props;
+    const { t, component: Component = CenteredContent, showTitle } = this.props;
 
     if (this.error) {
       const error = this.error;
-      const isReported = !!env.SENTRY_DSN && isHosted;
-      const isChunkError = this.error.message.match(/chunk/);
+      const isReported = !!env.SENTRY_DSN && isCloudHosted;
+      const isChunkError = [
+        "module script failed",
+        "dynamically imported module",
+      ].some((msg) => this.error?.message?.includes(msg));
 
       if (isChunkError) {
         return (
-          <CenteredContent>
-            <PageTitle title={t("Module failed to load")} />
-            <h1>
-              <Trans>Loading Failed</Trans>
-            </h1>
+          <Component>
+            {showTitle && (
+              <>
+                <PageTitle title={t("Module failed to load")} />
+                <h1>
+                  <Trans>Loading Failed</Trans>
+                </h1>
+              </>
+            )}
             <Text type="secondary">
               <Trans>
                 Sorry, part of the application failed to load. This may be
@@ -82,16 +92,20 @@ class ErrorBoundary extends React.Component<Props> {
             <p>
               <Button onClick={this.handleReload}>{t("Reload")}</Button>
             </p>
-          </CenteredContent>
+          </Component>
         );
       }
 
       return (
-        <CenteredContent>
-          <PageTitle title={t("Something Unexpected Happened")} />
-          <h1>
-            <Trans>Something Unexpected Happened</Trans>
-          </h1>
+        <Component>
+          {showTitle && (
+            <>
+              <PageTitle title={t("Something Unexpected Happened")} />
+              <h1>
+                <Trans>Something Unexpected Happened</Trans>
+              </h1>
+            </>
+          )}
           <Text type="secondary">
             <Trans
               defaults="Sorry, an unrecoverable error occurred{{notified}}. Please try reloading the page, it may have been a temporary glitch."
@@ -115,7 +129,7 @@ class ErrorBoundary extends React.Component<Props> {
               </Button>
             )}
           </p>
-        </CenteredContent>
+        </Component>
       );
     }
 
@@ -124,7 +138,7 @@ class ErrorBoundary extends React.Component<Props> {
 }
 
 const Pre = styled.pre`
-  background: ${(props) => props.theme.secondaryBackground};
+  background: ${s("secondaryBackground")};
   padding: 16px;
   border-radius: 4px;
   font-size: 12px;

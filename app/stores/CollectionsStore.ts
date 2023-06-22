@@ -1,9 +1,14 @@
 import invariant from "invariant";
-import { concat, find, last } from "lodash";
+import { concat, find, last, sortBy } from "lodash";
 import { computed, action } from "mobx";
+import {
+  CollectionPermission,
+  FileOperationFormat,
+  NavigationNode,
+} from "@shared/types";
 import Collection from "~/models/Collection";
-import { NavigationNode } from "~/types";
 import { client } from "~/utils/ApiClient";
+import { AuthorizationError, NotFoundError } from "~/utils/errors";
 import BaseStore from "./BaseStore";
 import RootStore from "./RootStore";
 
@@ -29,8 +34,14 @@ export default class CollectionsStore extends BaseStore<Collection> {
     super(rootStore, Collection);
   }
 
+  /**
+   * Returns the currently active collection, or undefined if not in the context
+   * of a collection.
+   *
+   * @returns The active Collection or undefined
+   */
   @computed
-  get active(): Collection | null | undefined {
+  get active(): Collection | undefined {
     return this.rootStore.ui.activeCollectionId
       ? this.data.get(this.rootStore.ui.activeCollectionId)
       : undefined;
@@ -39,9 +50,12 @@ export default class CollectionsStore extends BaseStore<Collection> {
   @computed
   get orderedData(): Collection[] {
     let collections = Array.from(this.data.values());
-    collections = collections.filter((collection) =>
-      collection.deletedAt ? false : true
-    );
+    collections = collections
+      .filter((collection) => !collection.deletedAt)
+      .filter(
+        (collection) =>
+          this.rootStore.policies.abilities(collection.id).readDocument
+      );
     return collections.sort((a, b) => {
       if (a.index === b.index) {
         return a.updatedAt > b.updatedAt ? -1 : 1;
@@ -49,6 +63,14 @@ export default class CollectionsStore extends BaseStore<Collection> {
 
       return a.index < b.index ? -1 : 1;
     });
+  }
+
+  @computed
+  get all(): Collection[] {
+    return sortBy(
+      Array.from(this.data.values()),
+      (collection) => collection.name
+    );
   }
 
   /**
@@ -87,7 +109,10 @@ export default class CollectionsStore extends BaseStore<Collection> {
           url,
         };
         results.push([node]);
-        travelDocuments(collection.documents, id, [node]);
+
+        if (collection.documents) {
+          travelDocuments(collection.documents, id, [node]);
+        }
       });
     }
 
@@ -98,9 +123,10 @@ export default class CollectionsStore extends BaseStore<Collection> {
   }
 
   @action
-  import = async (attachmentId: string) => {
+  import = async (attachmentId: string, format?: string) => {
     await client.post("/collections.import", {
       type: "outline",
+      format,
       attachmentId,
     });
   };
@@ -126,13 +152,9 @@ export default class CollectionsStore extends BaseStore<Collection> {
     // remove all locally cached policies for documents in the collection as they
     // are now invalid
     if (params.sharing !== undefined) {
-      const collection = this.get(params.id);
-
-      if (collection) {
-        collection.documentIds.forEach((id) => {
-          this.rootStore.policies.remove(id);
-        });
-      }
+      this.rootStore.documents.inCollection(params.id).forEach((document) => {
+        this.rootStore.policies.remove(document.id);
+      });
     }
 
     return result;
@@ -157,7 +179,7 @@ export default class CollectionsStore extends BaseStore<Collection> {
       this.addPolicies(res.policies);
       return this.add(res.data);
     } catch (err) {
-      if (err.statusCode === 403) {
+      if (err instanceof AuthorizationError || err instanceof NotFoundError) {
         this.remove(id);
       }
 
@@ -169,8 +191,10 @@ export default class CollectionsStore extends BaseStore<Collection> {
 
   @computed
   get publicCollections() {
-    return this.orderedData.filter((collection) =>
-      ["read", "read_write"].includes(collection.permission || "")
+    return this.orderedData.filter(
+      (collection) =>
+        collection.permission &&
+        Object.values(CollectionPermission).includes(collection.permission)
     );
   }
 
@@ -191,8 +215,10 @@ export default class CollectionsStore extends BaseStore<Collection> {
     return this.pathsToDocuments.find((path) => path.id === documentId);
   }
 
-  titleForDocument(documentUrl: string): string | undefined {
-    const path = this.pathsToDocuments.find((path) => path.url === documentUrl);
+  titleForDocument(documentPath: string): string | undefined {
+    const path = this.pathsToDocuments.find(
+      (path) => path.url === documentPath
+    );
     if (path) {
       return path.title;
     }
@@ -210,7 +236,9 @@ export default class CollectionsStore extends BaseStore<Collection> {
     this.rootStore.documents.fetchRecentlyViewed();
   };
 
-  export = () => {
-    return client.post("/collections.export_all");
-  };
+  export = (format: FileOperationFormat, includeAttachments: boolean) =>
+    client.post("/collections.export_all", {
+      format,
+      includeAttachments,
+    });
 }
