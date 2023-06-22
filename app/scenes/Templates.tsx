@@ -21,11 +21,11 @@ function Templates(props: RouteComponentProps<{ sort: string }>) {
   const team = useCurrentTeam();
   const { fetchTemplates, templates, templatesAlphabetical } = documents;
   const { sort } = props.match.params;
-  const can = usePolicy(team.id);
+  const can = usePolicy(team);
 
   return (
     <Scene
-      icon={<ShapesIcon color="currentColor" />}
+      icon={<ShapesIcon />}
       title={t("Templates")}
       actions={
         <Action>

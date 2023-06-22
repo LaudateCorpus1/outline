@@ -11,8 +11,10 @@ import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import styled from "styled-components";
+import { NavigationNode } from "@shared/types";
 import { Theme } from "~/stores/UiStore";
 import Document from "~/models/Document";
+import Revision from "~/models/Revision";
 import { Action, Separator } from "~/components/Actions";
 import Badge from "~/components/Badge";
 import Button from "~/components/Button";
@@ -20,6 +22,9 @@ import Collaborators from "~/components/Collaborators";
 import DocumentBreadcrumb from "~/components/DocumentBreadcrumb";
 import Header from "~/components/Header";
 import Tooltip from "~/components/Tooltip";
+import { publishDocument } from "~/actions/definitions/documents";
+import { restoreRevision } from "~/actions/definitions/revisions";
+import useActionContext from "~/hooks/useActionContext";
 import useMobile from "~/hooks/useMobile";
 import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";
@@ -27,9 +32,8 @@ import DocumentMenu from "~/menus/DocumentMenu";
 import NewChildDocumentMenu from "~/menus/NewChildDocumentMenu";
 import TableOfContentsMenu from "~/menus/TableOfContentsMenu";
 import TemplatesMenu from "~/menus/TemplatesMenu";
-import { NavigationNode } from "~/types";
 import { metaDisplay } from "~/utils/keyboard";
-import { newDocumentPath, editDocumentUrl } from "~/utils/routeHelpers";
+import { newDocumentPath, documentEditPath } from "~/utils/routeHelpers";
 import ObservingBanner from "./ObservingBanner";
 import PublicBreadcrumb from "./PublicBreadcrumb";
 import ShareButton from "./ShareButton";
@@ -37,11 +41,11 @@ import ShareButton from "./ShareButton";
 type Props = {
   document: Document;
   documentHasHeadings: boolean;
+  revision: Revision | undefined;
   sharedTree: NavigationNode | undefined;
   shareId: string | null | undefined;
   isDraft: boolean;
   isEditing: boolean;
-  isRevision: boolean;
   isSaving: boolean;
   isPublishing: boolean;
   publishingIsDisabled: boolean;
@@ -62,11 +66,11 @@ type Props = {
 function DocumentHeader({
   document,
   documentHasHeadings,
+  revision,
   shareId,
   isEditing,
   isDraft,
   isPublishing,
-  isRevision,
   isSaving,
   savingIsDisabled,
   publishingIsDisabled,
@@ -80,6 +84,7 @@ function DocumentHeader({
   const { resolvedTheme } = ui;
   const { team } = auth;
   const isMobile = useMobile();
+  const isRevision = !!revision;
 
   // We cache this value for as long as the component is mounted so that if you
   // apply a template there is still the option to replace it until the user
@@ -92,15 +97,12 @@ function DocumentHeader({
     });
   }, [onSave]);
 
-  const handlePublish = React.useCallback(() => {
-    onSave({
-      done: true,
-      publish: true,
-    });
-  }, [onSave]);
+  const context = useActionContext({
+    activeDocumentId: document?.id,
+  });
 
   const { isDeleted, isTemplate } = document;
-  const can = usePolicy(document.id);
+  const can = usePolicy(document?.id);
   const canToggleEmbeds = team?.documentEmbeds;
   const canEdit = can.update && !isEditing;
   const toc = (
@@ -115,7 +117,6 @@ function DocumentHeader({
           ui.tocVisible ? ui.hideTableOfContents : ui.showTableOfContents
         }
         icon={<TableOfContentsIcon />}
-        iconColor="currentColor"
         borderOnHover
         neutral
       />
@@ -134,7 +135,7 @@ function DocumentHeader({
         <Button
           as={Link}
           icon={<EditIcon />}
-          to={editDocumentUrl(document)}
+          to={documentEditPath(document)}
           neutral
         >
           {t("Edit")}
@@ -168,7 +169,7 @@ function DocumentHeader({
       <Header
         title={document.title}
         hasSidebar={!!sharedTree}
-        breadcrumb={
+        left={
           isMobile ? (
             <TableOfContentsMenu headings={headings} />
           ) : (
@@ -195,30 +196,30 @@ function DocumentHeader({
     <>
       <Header
         hasSidebar
-        breadcrumb={
+        left={
           isMobile ? (
             <TableOfContentsMenu headings={headings} />
           ) : (
-            <DocumentBreadcrumb document={document}>
-              {!isEditing && toc}
-            </DocumentBreadcrumb>
+            <DocumentBreadcrumb document={document}>{toc}</DocumentBreadcrumb>
           )
         }
         title={
           <>
             {document.title}{" "}
-            {document.isArchived && <Badge>{t("Archived")}</Badge>}
+            {document.isArchived && (
+              <ArchivedBadge>{t("Archived")}</ArchivedBadge>
+            )}
           </>
         }
         actions={
           <>
             <ObservingBanner />
 
-            {!isPublishing && isSaving && !team?.collaborativeEditing && (
+            {!isPublishing && isSaving && !team?.seamlessEditing && (
               <Status>{t("Saving")}…</Status>
             )}
-            {!isDeleted && <Collaborators document={document} />}
-            {(isEditing || team?.collaborativeEditing) && !isTemplate && isNew && (
+            {!isDeleted && !isRevision && <Collaborators document={document} />}
+            {(isEditing || team?.seamlessEditing) && !isTemplate && isNew && (
               <Action>
                 <TemplatesMenu
                   document={document}
@@ -226,11 +227,15 @@ function DocumentHeader({
                 />
               </Action>
             )}
-            {!isEditing && !isDeleted && (!isMobile || !isTemplate) && (
-              <Action>
-                <ShareButton document={document} />
-              </Action>
-            )}
+            {!isEditing &&
+              !isDeleted &&
+              !isRevision &&
+              (!isMobile || !isTemplate) &&
+              document.collectionId && (
+                <Action>
+                  <ShareButton document={document} />
+                </Action>
+              )}
             {isEditing && (
               <>
                 <Action>
@@ -251,8 +256,8 @@ function DocumentHeader({
                 </Action>
               </>
             )}
-            {canEdit && !team?.collaborativeEditing && editAction}
-            {canEdit && can.createChildDocument && !isMobile && (
+            {canEdit && !team?.seamlessEditing && !isRevision && editAction}
+            {canEdit && can.createChildDocument && !isRevision && !isMobile && (
               <Action>
                 <NewChildDocumentMenu
                   document={document}
@@ -279,29 +284,40 @@ function DocumentHeader({
                   to={newDocumentPath(document.collectionId, {
                     templateId: document.id,
                   })}
-                  primary
                 >
                   {t("New from template")}
                 </Button>
               </Action>
             )}
-            {can.update && isDraft && !isRevision && (
+            {revision && revision.createdAt !== document.updatedAt && (
               <Action>
                 <Tooltip
-                  tooltip={t("Publish")}
-                  shortcut={`${metaDisplay}+shift+p`}
+                  tooltip={t("Restore version")}
                   delay={500}
                   placement="bottom"
                 >
                   <Button
-                    onClick={handlePublish}
-                    disabled={publishingIsDisabled}
+                    action={restoreRevision}
+                    context={context}
+                    neutral
+                    hideOnActionDisabled
                   >
-                    {isPublishing ? `${t("Publishing")}…` : t("Publish")}
+                    {t("Restore")}
                   </Button>
                 </Tooltip>
               </Action>
             )}
+            <Action>
+              <Button
+                action={publishDocument}
+                context={context}
+                disabled={publishingIsDisabled}
+                hideOnActionDisabled
+                hideIcon
+              >
+                {document.collectionId ? t("Publish") : `${t("Publish")}…`}
+              </Button>
+            </Action>
             {!isEditing && (
               <>
                 {!isDeleted && <Separator />}
@@ -312,7 +328,6 @@ function DocumentHeader({
                     label={(props) => (
                       <Button
                         icon={<MoreIcon />}
-                        iconColor="currentColor"
                         {...props}
                         borderOnHover
                         neutral
@@ -330,6 +345,10 @@ function DocumentHeader({
     </>
   );
 }
+
+const ArchivedBadge = styled(Badge)`
+  position: absolute;
+`;
 
 const Status = styled(Action)`
   padding-left: 0;

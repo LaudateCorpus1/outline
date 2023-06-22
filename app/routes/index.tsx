@@ -1,45 +1,17 @@
 import * as React from "react";
-import { Switch } from "react-router-dom";
+import { Switch, Redirect } from "react-router-dom";
+import DesktopRedirect from "~/scenes/DesktopRedirect";
 import DelayedMount from "~/components/DelayedMount";
 import FullscreenLoading from "~/components/FullscreenLoading";
 import Route from "~/components/ProfiledRoute";
+import lazyWithRetry from "~/utils/lazyWithRetry";
 import { matchDocumentSlug as slug } from "~/utils/routeHelpers";
 
-const Authenticated = React.lazy(
-  () =>
-    import(
-      /* webpackChunkName: "authenticated" */
-      "~/components/Authenticated"
-    )
-);
-const AuthenticatedRoutes = React.lazy(
-  () =>
-    import(
-      /* webpackChunkName: "authenticated-routes" */
-      "./authenticated"
-    )
-);
-const SharedDocument = React.lazy(
-  () =>
-    import(
-      /* webpackChunkName: "shared-document" */
-      "~/scenes/Document/Shared"
-    )
-);
-const Login = React.lazy(
-  () =>
-    import(
-      /* webpackChunkName: "login" */
-      "~/scenes/Login"
-    )
-);
-const Logout = React.lazy(
-  () =>
-    import(
-      /* webpackChunkName: "logout" */
-      "~/scenes/Logout"
-    )
-);
+const Authenticated = lazyWithRetry(() => import("~/components/Authenticated"));
+const AuthenticatedRoutes = lazyWithRetry(() => import("./authenticated"));
+const SharedDocument = lazyWithRetry(() => import("~/scenes/Document/Shared"));
+const Login = lazyWithRetry(() => import("~/scenes/Login"));
+const Logout = lazyWithRetry(() => import("~/scenes/Logout"));
 
 export default function Routes() {
   return (
@@ -54,11 +26,19 @@ export default function Routes() {
         <Route exact path="/" component={Login} />
         <Route exact path="/create" component={Login} />
         <Route exact path="/logout" component={Logout} />
+        <Route exact path="/desktop-redirect" component={DesktopRedirect} />
 
-        <Route exact path="/share/:shareId" component={SharedDocument} />
+        <Redirect exact from="/share/:shareId" to="/s/:shareId" />
+        <Route exact path="/s/:shareId" component={SharedDocument} />
+
+        <Redirect
+          exact
+          from={`/share/:shareId/doc/${slug}`}
+          to={`/s/:shareId/doc/${slug}`}
+        />
         <Route
           exact
-          path={`/share/:shareId/doc/${slug}`}
+          path={`/s/:shareId/doc/${slug}`}
           component={SharedDocument}
         />
 

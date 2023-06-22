@@ -1,5 +1,6 @@
-const randomInteger = (min: number, max: number) => {
-  return Math.floor(Math.random() * (max - min + 1) + min);
-};
+const randomInteger = (min: number, max: number) =>
+  Math.floor(Math.random() * (max - min + 1) + min);
 
-export { randomInteger };
+const randomElement = <T>(arr: T[]): T => arr[randomInteger(0, arr.length - 1)];
+
+export { randomInteger, randomElement };

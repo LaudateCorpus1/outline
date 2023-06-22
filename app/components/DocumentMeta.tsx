@@ -1,9 +1,12 @@
+import { LocationDescriptor } from "history";
 import { observer } from "mobx-react";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import styled from "styled-components";
+import { s, ellipsis } from "@shared/styles";
 import Document from "~/models/Document";
+import Revision from "~/models/Revision";
 import DocumentBreadcrumb from "~/components/DocumentBreadcrumb";
 import DocumentTasks from "~/components/DocumentTasks";
 import Flex from "~/components/Flex";
@@ -11,31 +14,15 @@ import Time from "~/components/Time";
 import useCurrentUser from "~/hooks/useCurrentUser";
 import useStores from "~/hooks/useStores";
 
-const Container = styled(Flex)<{ rtl?: boolean }>`
-  justify-content: ${(props) => (props.rtl ? "flex-end" : "flex-start")};
-  color: ${(props) => props.theme.textTertiary};
-  font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  min-width: 0;
-`;
-
-const Viewed = styled.span`
-  text-overflow: ellipsis;
-  overflow: hidden;
-`;
-
-const Modified = styled.span<{ highlight?: boolean }>`
-  font-weight: ${(props) => (props.highlight ? "600" : "400")};
-`;
-
 type Props = {
   showCollection?: boolean;
   showPublished?: boolean;
   showLastViewed?: boolean;
   showParentDocuments?: boolean;
   document: Document;
-  to?: string;
+  revision?: Revision;
+  replace?: boolean;
+  to?: LocationDescriptor;
 };
 
 const DocumentMeta: React.FC<Props> = ({
@@ -44,7 +31,9 @@ const DocumentMeta: React.FC<Props> = ({
   showLastViewed,
   showParentDocuments,
   document,
+  revision,
   children,
+  replace,
   to,
   ...rest
 }) => {
@@ -71,44 +60,74 @@ const DocumentMeta: React.FC<Props> = ({
     return null;
   }
 
-  const collection = collections.get(document.collectionId);
+  const collection = document.collectionId
+    ? collections.get(document.collectionId)
+    : undefined;
   const lastUpdatedByCurrentUser = user.id === updatedBy.id;
+  const userName = updatedBy.name;
   let content;
 
-  if (deletedAt) {
+  if (revision) {
     content = (
       <span>
-        {t("deleted")} <Time dateTime={deletedAt} addSuffix />
+        {revision.createdBy?.id === user.id
+          ? t("You updated")
+          : t("{{ userName }} updated", { userName })}{" "}
+        <Time dateTime={revision.createdAt} addSuffix />
+      </span>
+    );
+  } else if (deletedAt) {
+    content = (
+      <span>
+        {lastUpdatedByCurrentUser
+          ? t("You deleted")
+          : t("{{ userName }} deleted", { userName })}{" "}
+        <Time dateTime={deletedAt} addSuffix />
       </span>
     );
   } else if (archivedAt) {
     content = (
       <span>
-        {t("archived")} <Time dateTime={archivedAt} addSuffix />
+        {lastUpdatedByCurrentUser
+          ? t("You archived")
+          : t("{{ userName }} archived", { userName })}{" "}
+        <Time dateTime={archivedAt} addSuffix />
       </span>
     );
   } else if (createdAt === updatedAt) {
     content = (
       <span>
-        {t("created")} <Time dateTime={updatedAt} addSuffix />
+        {lastUpdatedByCurrentUser
+          ? t("You created")
+          : t("{{ userName }} created", { userName })}{" "}
+        <Time dateTime={updatedAt} addSuffix />
       </span>
     );
   } else if (publishedAt && (publishedAt === updatedAt || showPublished)) {
     content = (
       <span>
-        {t("published")} <Time dateTime={publishedAt} addSuffix />
+        {lastUpdatedByCurrentUser
+          ? t("You published")
+          : t("{{ userName }} published", { userName })}{" "}
+        <Time dateTime={publishedAt} addSuffix />
       </span>
     );
   } else if (isDraft) {
     content = (
       <span>
-        {t("saved")} <Time dateTime={updatedAt} addSuffix />
+        {lastUpdatedByCurrentUser
+          ? t("You saved")
+          : t("{{ userName }} saved", { userName })}{" "}
+        <Time dateTime={updatedAt} addSuffix />
       </span>
     );
   } else {
     content = (
       <Modified highlight={modifiedSinceViewed && !lastUpdatedByCurrentUser}>
-        {t("updated")} <Time dateTime={updatedAt} addSuffix />
+        {lastUpdatedByCurrentUser
+          ? t("You updated")
+          : t("{{ userName }} updated", { userName })}{" "}
+        <Time dateTime={updatedAt} addSuffix />
       </Modified>
     );
   }
@@ -143,8 +162,13 @@ const DocumentMeta: React.FC<Props> = ({
 
   return (
     <Container align="center" rtl={document.dir === "rtl"} {...rest} dir="ltr">
-      {lastUpdatedByCurrentUser ? t("You") : updatedBy.name}&nbsp;
-      {to ? <Link to={to}>{content}</Link> : content}
+      {to ? (
+        <Link to={to} replace={replace}>
+          {content}
+        </Link>
+      ) : (
+        content
+      )}
       {showCollection && collection && (
         <span>
           &nbsp;{t("in")}&nbsp;
@@ -172,5 +196,22 @@ const DocumentMeta: React.FC<Props> = ({
     </Container>
   );
 };
+
+const Container = styled(Flex)<{ rtl?: boolean }>`
+  justify-content: ${(props) => (props.rtl ? "flex-end" : "flex-start")};
+  color: ${s("textTertiary")};
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  min-width: 0;
+`;
+
+const Viewed = styled.span`
+  ${ellipsis()}
+`;
+
+const Modified = styled.span<{ highlight?: boolean }>`
+  font-weight: ${(props) => (props.highlight ? "600" : "400")};
+`;
 
 export default observer(DocumentMeta);

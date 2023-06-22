@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { useHistory } from "react-router-dom";
 import { IndexeddbPersistence } from "y-indexeddb";
 import * as Y from "yjs";
+import MultiplayerExtension from "@shared/editor/extensions/Multiplayer";
 import Editor, { Props as EditorProps } from "~/components/Editor";
 import env from "~/env";
 import useCurrentToken from "~/hooks/useCurrentToken";
@@ -14,7 +15,8 @@ import useIsMounted from "~/hooks/useIsMounted";
 import usePageVisibility from "~/hooks/usePageVisibility";
 import useStores from "~/hooks/useStores";
 import useToasts from "~/hooks/useToasts";
-import MultiplayerExtension from "~/multiplayer/MultiplayerExtension";
+import { AwarenessChangeEvent } from "~/types";
+import Logger from "~/utils/Logger";
 import { supportsPassiveListener } from "~/utils/browser";
 import { homePath } from "~/utils/routeHelpers";
 
@@ -29,13 +31,14 @@ export type ConnectionStatus =
   | "disconnected"
   | void;
 
-type AwarenessChangeEvent = {
-  states: { user: { id: string }; cursor: any; scrollY: number | undefined }[];
-};
-
 type ConnectionStatusEvent = { status: ConnectionStatus };
 
-type MessageEvent = { message: string };
+type MessageEvent = {
+  message: string;
+  event: Event & {
+    code?: number;
+  };
+};
 
 function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
   const documentId = props.id;
@@ -45,10 +48,8 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
   const { presence, ui } = useStores();
   const token = useCurrentToken();
   const [showCursorNames, setShowCursorNames] = React.useState(false);
-  const [
-    remoteProvider,
-    setRemoteProvider,
-  ] = React.useState<HocuspocusProvider | null>(null);
+  const [remoteProvider, setRemoteProvider] =
+    React.useState<HocuspocusProvider | null>(null);
   const [isLocalSynced, setLocalSynced] = React.useState(false);
   const [isRemoteSynced, setRemoteSynced] = React.useState(false);
   const [ydoc] = React.useState(() => new Y.Doc());
@@ -102,17 +103,15 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
       history.replace(homePath());
     });
 
-    provider.on("awarenessChange", ({ states }: AwarenessChangeEvent) => {
-      states.forEach(({ user, cursor, scrollY }) => {
-        if (user) {
-          presence.touch(documentId, user.id, !!cursor);
+    provider.on("awarenessChange", (event: AwarenessChangeEvent) => {
+      presence.updateFromAwarenessChangeEvent(documentId, event);
 
-          if (scrollY !== undefined && user.id === ui.observingUserId) {
-            window.scrollTo({
-              top: scrollY * window.innerHeight,
-              behavior: "smooth",
-            });
-          }
+      event.states.forEach(({ user, scrollY }) => {
+        if (scrollY !== undefined && user?.id === ui.observingUserId) {
+          window.scrollTo({
+            top: scrollY * window.innerHeight,
+            behavior: "smooth",
+          });
         }
       });
     });
@@ -137,17 +136,34 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
       setRemoteSynced(true);
     });
 
+    provider.on("close", (ev: MessageEvent) => {
+      if ("code" in ev.event && ev.event.code === 1009) {
+        provider.shouldConnect = false;
+        showToast(
+          t(
+            "Sorry, this document is too large - edits will no longer be persisted."
+          )
+        );
+      }
+    });
+
     if (debug) {
-      provider.on("status", (ev: ConnectionStatusEvent) =>
-        console.log("status", ev.status)
+      provider.on("close", (ev: MessageEvent) =>
+        Logger.debug("collaboration", "close", ev)
       );
       provider.on("message", (ev: MessageEvent) =>
-        console.log("incoming", ev.message)
+        Logger.debug("collaboration", "incoming", {
+          message: ev.message,
+        })
       );
       provider.on("outgoingMessage", (ev: MessageEvent) =>
-        console.log("outgoing", ev.message)
+        Logger.debug("collaboration", "outgoing", {
+          message: ev.message,
+        })
       );
-      localProvider.on("synced", () => console.log("local synced"));
+      localProvider.on("synced", () =>
+        Logger.debug("collaboration", "local synced")
+      );
     }
 
     provider.on("status", (ev: ConnectionStatusEvent) =>
@@ -178,13 +194,14 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
     isMounted,
   ]);
 
-  const user = React.useMemo(() => {
-    return {
+  const user = React.useMemo(
+    () => ({
       id: currentUser.id,
       name: currentUser.name,
       color: currentUser.color,
-    };
-  }, [currentUser.id, currentUser.color, currentUser.name]);
+    }),
+    [currentUser.id, currentUser.color, currentUser.name]
+  );
 
   const extensions = React.useMemo(() => {
     if (!remoteProvider) {
@@ -234,8 +251,8 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
   // we must prevent the user from continuing to edit as their changes will not
   // be persisted. See: https://github.com/yjs/yjs/issues/303
   React.useEffect(() => {
-    function onUnhandledError(err: any) {
-      if (err.message.includes("URIError: URI malformed")) {
+    function onUnhandledError(event: ErrorEvent) {
+      if (event.message.includes("URIError: URI malformed")) {
         showToast(
           t(
             "Sorry, the last change could not be persisted – please reload the page"
@@ -264,6 +281,7 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
     <>
       {showCache && (
         <Editor
+          embedsDisabled={props.embedsDisabled}
           defaultValue={props.defaultValue}
           extensions={props.extensions}
           readOnly
@@ -279,7 +297,8 @@ function MultiplayerEditor({ onSynced, ...props }: Props, ref: any) {
         style={
           showCache
             ? {
-                display: "none",
+                opacity: 0,
+                pointerEvents: "none",
               }
             : undefined
         }

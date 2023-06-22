@@ -1,64 +1,66 @@
-import { observable } from "mobx";
-import { observer } from "mobx-react";
 import * as React from "react";
 import styled from "styled-components";
-import User from "~/models/User";
-import placeholder from "./placeholder.png";
+import useBoolean from "~/hooks/useBoolean";
+import Initials from "./Initials";
+
+export enum AvatarSize {
+  Small = 16,
+  Medium = 24,
+  Large = 32,
+  XLarge = 48,
+}
+
+export interface IAvatar {
+  avatarUrl: string | null;
+  color?: string;
+  initial?: string;
+  id?: string;
+}
 
 type Props = {
-  src: string;
-  size: number;
-  icon?: React.ReactNode;
-  user?: User;
+  size: AvatarSize;
+  src?: string;
+  model?: IAvatar;
   alt?: string;
   showBorder?: boolean;
   onClick?: React.MouseEventHandler<HTMLImageElement>;
   className?: string;
+  style?: React.CSSProperties;
 };
 
-@observer
-class Avatar extends React.Component<Props> {
-  @observable
-  error: boolean;
+function Avatar(props: Props) {
+  const { showBorder, model, style, ...rest } = props;
+  const src = props.src || model?.avatarUrl;
+  const [error, handleError] = useBoolean(false);
 
-  static defaultProps = {
-    size: 24,
-  };
-
-  handleError = () => {
-    this.error = true;
-  };
-
-  render() {
-    const { src, icon, showBorder, ...rest } = this.props;
-    return (
-      <AvatarWrapper>
+  return (
+    <Relative style={style}>
+      {src && !error ? (
         <CircleImg
-          onError={this.handleError}
-          src={this.error ? placeholder : src}
+          onError={handleError}
+          src={src}
           $showBorder={showBorder}
           {...rest}
         />
-        {icon && <IconWrapper>{icon}</IconWrapper>}
-      </AvatarWrapper>
-    );
-  }
+      ) : model ? (
+        <Initials color={model.color} $showBorder={showBorder} {...rest}>
+          {model.initial}
+        </Initials>
+      ) : (
+        <Initials $showBorder={showBorder} {...rest} />
+      )}
+    </Relative>
+  );
 }
 
-const AvatarWrapper = styled.div`
-  position: relative;
-`;
+Avatar.defaultProps = {
+  size: AvatarSize.Medium,
+};
 
-const IconWrapper = styled.div`
-  display: flex;
-  position: absolute;
-  bottom: -2px;
-  right: -2px;
-  background: ${(props) => props.theme.primary};
-  border: 2px solid ${(props) => props.theme.background};
-  border-radius: 100%;
-  width: 20px;
-  height: 20px;
+const Relative = styled.div`
+  position: relative;
+  user-select: none;
+  flex-shrink: 0;
 `;
 
 const CircleImg = styled.img<{ size: number; $showBorder?: boolean }>`
@@ -66,10 +68,12 @@ const CircleImg = styled.img<{ size: number; $showBorder?: boolean }>`
   width: ${(props) => props.size}px;
   height: ${(props) => props.size}px;
   border-radius: 50%;
-  border: 2px solid
-    ${(props) =>
-      props.$showBorder === false ? "transparent" : props.theme.background};
+  border: ${(props) =>
+    props.$showBorder === false
+      ? "none"
+      : `2px solid ${props.theme.background}`};
   flex-shrink: 0;
+  overflow: hidden;
 `;
 
 export default Avatar;

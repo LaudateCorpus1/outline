@@ -1,31 +1,31 @@
 import { observer } from "mobx-react";
 import {
   NewDocumentIcon,
-  EditIcon,
-  TrashIcon,
   ImportIcon,
   ExportIcon,
-  PadlockIcon,
   AlphabeticalSortIcon,
   ManualSortIcon,
-  UnstarredIcon,
-  StarredIcon,
 } from "outline-icons";
 import * as React from "react";
 import { useTranslation } from "react-i18next";
 import { useHistory } from "react-router-dom";
 import { useMenuState, MenuButton, MenuButtonHTMLProps } from "reakit/Menu";
 import { VisuallyHidden } from "reakit/VisuallyHidden";
-import getDataTransferFiles from "@shared/utils/getDataTransferFiles";
+import { getEventFiles } from "@shared/utils/files";
 import Collection from "~/models/Collection";
-import CollectionDelete from "~/scenes/CollectionDelete";
-import CollectionEdit from "~/scenes/CollectionEdit";
-import CollectionExport from "~/scenes/CollectionExport";
-import CollectionPermissions from "~/scenes/CollectionPermissions";
 import ContextMenu, { Placement } from "~/components/ContextMenu";
 import OverflowMenuButton from "~/components/ContextMenu/OverflowMenuButton";
 import Template from "~/components/ContextMenu/Template";
-import Modal from "~/components/Modal";
+import ExportDialog from "~/components/ExportDialog";
+import { actionToMenuItem } from "~/actions";
+import {
+  deleteCollection,
+  editCollection,
+  editCollectionPermissions,
+  starCollection,
+  unstarCollection,
+} from "~/actions/definitions/collections";
+import useActionContext from "~/hooks/useActionContext";
 import useCurrentTeam from "~/hooks/useCurrentTeam";
 import usePolicy from "~/hooks/usePolicy";
 import useStores from "~/hooks/useStores";
@@ -54,27 +54,25 @@ function CollectionMenu({
     modal,
     placement,
   });
-  const [renderModals, setRenderModals] = React.useState(false);
   const team = useCurrentTeam();
   const { documents, dialogs } = useStores();
   const { showToast } = useToasts();
   const { t } = useTranslation();
   const history = useHistory();
   const file = React.useRef<HTMLInputElement>(null);
-  const [
-    showCollectionPermissions,
-    setShowCollectionPermissions,
-  ] = React.useState(false);
-  const [showCollectionEdit, setShowCollectionEdit] = React.useState(false);
-  const [showCollectionExport, setShowCollectionExport] = React.useState(false);
 
-  const handleOpen = React.useCallback(() => {
-    setRenderModals(true);
-
-    if (onOpen) {
-      onOpen();
-    }
-  }, [onOpen]);
+  const handleExport = React.useCallback(() => {
+    dialogs.openModal({
+      title: t("Export collection"),
+      isCentered: true,
+      content: (
+        <ExportDialog
+          collection={collection}
+          onSubmit={dialogs.closeAllModals}
+        />
+      ),
+    });
+  }, [collection, dialogs, t]);
 
   const handleNewDocument = React.useCallback(
     (ev: React.SyntheticEvent) => {
@@ -102,8 +100,8 @@ function CollectionMenu({
   );
 
   const handleFilePicked = React.useCallback(
-    async (ev: React.FormEvent<HTMLInputElement>) => {
-      const files = getDataTransferFiles(ev);
+    async (ev: React.ChangeEvent<HTMLInputElement>) => {
+      const files = getEventFiles(ev);
 
       // Because this is the onChange handler it's possible for the change to be
       // from previously selecting a file to not selecting a file – aka empty
@@ -140,85 +138,45 @@ function CollectionMenu({
     [collection, menu]
   );
 
-  const handleDelete = React.useCallback(() => {
-    dialogs.openModal({
-      isCentered: true,
-      title: t("Delete collection"),
-      content: (
-        <CollectionDelete
-          collection={collection}
-          onSubmit={dialogs.closeAllModals}
-        />
-      ),
-    });
-  }, [dialogs, t, collection]);
-
-  const handleStar = React.useCallback(
-    (ev: React.SyntheticEvent) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      collection.star();
-    },
-    [collection]
-  );
-
-  const handleUnstar = React.useCallback(
-    (ev: React.SyntheticEvent) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      collection.unstar();
-    },
-    [collection]
-  );
+  const context = useActionContext({
+    isContextMenu: true,
+    activeCollectionId: collection.id,
+  });
 
   const alphabeticalSort = collection.sort.field === "title";
-  const can = usePolicy(collection.id);
-  const canUserInTeam = usePolicy(team.id);
+  const can = usePolicy(collection);
+  const canUserInTeam = usePolicy(team);
   const items: MenuItem[] = React.useMemo(
     () => [
-      {
-        type: "button",
-        title: t("Unstar"),
-        onClick: handleUnstar,
-        visible: collection.isStarred && !!can.unstar,
-        icon: <UnstarredIcon />,
-      },
-      {
-        type: "button",
-        title: t("Star"),
-        onClick: handleStar,
-        visible: !collection.isStarred && !!can.star,
-        icon: <StarredIcon />,
-      },
+      actionToMenuItem(starCollection, context),
+      actionToMenuItem(unstarCollection, context),
       {
         type: "separator",
       },
       {
         type: "button",
         title: t("New document"),
-        visible: can.update,
+        visible: can.createDocument,
         onClick: handleNewDocument,
         icon: <NewDocumentIcon />,
       },
       {
         type: "button",
         title: t("Import document"),
-        visible: can.update,
+        visible: can.createDocument,
         onClick: handleImportDocument,
         icon: <ImportIcon />,
       },
       {
         type: "separator",
       },
+      actionToMenuItem(editCollection, context),
+      actionToMenuItem(editCollectionPermissions, context),
       {
         type: "submenu",
         title: t("Sort in sidebar"),
         visible: can.update,
-        icon: alphabeticalSort ? (
-          <AlphabeticalSortIcon color="currentColor" />
-        ) : (
-          <ManualSortIcon color="currentColor" />
-        ),
+        icon: alphabeticalSort ? <AlphabeticalSortIcon /> : <ManualSortIcon />,
         items: [
           {
             type: "button",
@@ -236,52 +194,29 @@ function CollectionMenu({
       },
       {
         type: "button",
-        title: `${t("Edit")}…`,
-        visible: can.update,
-        onClick: () => setShowCollectionEdit(true),
-        icon: <EditIcon />,
-      },
-      {
-        type: "button",
-        title: `${t("Permissions")}…`,
-        visible: can.update,
-        onClick: () => setShowCollectionPermissions(true),
-        icon: <PadlockIcon />,
-      },
-      {
-        type: "button",
         title: `${t("Export")}…`,
-        visible: !!(collection && canUserInTeam.export),
-        onClick: () => setShowCollectionExport(true),
+        visible: !!(collection && canUserInTeam.createExport && can.export),
+        onClick: handleExport,
         icon: <ExportIcon />,
       },
       {
         type: "separator",
       },
-      {
-        type: "button",
-        title: `${t("Delete")}…`,
-        dangerous: true,
-        visible: !!(collection && can.delete),
-        onClick: handleDelete,
-        icon: <TrashIcon />,
-      },
+      actionToMenuItem(deleteCollection, context),
     ],
     [
       t,
+      collection,
+      can.createDocument,
       can.update,
-      can.delete,
-      can.star,
-      can.unstar,
-      handleStar,
-      handleUnstar,
-      alphabeticalSort,
-      handleChangeSort,
+      can.export,
       handleNewDocument,
       handleImportDocument,
-      handleDelete,
-      collection,
-      canUserInTeam.export,
+      context,
+      alphabeticalSort,
+      canUserInTeam.createExport,
+      handleExport,
+      handleChangeSort,
     ]
   );
 
@@ -311,43 +246,12 @@ function CollectionMenu({
       )}
       <ContextMenu
         {...menu}
-        onOpen={handleOpen}
+        onOpen={onOpen}
         onClose={onClose}
         aria-label={t("Collection")}
       >
         <Template {...menu} items={items} />
       </ContextMenu>
-      {renderModals && (
-        <>
-          <Modal
-            title={t("Collection permissions")}
-            onRequestClose={() => setShowCollectionPermissions(false)}
-            isOpen={showCollectionPermissions}
-          >
-            <CollectionPermissions collection={collection} />
-          </Modal>
-          <Modal
-            title={t("Edit collection")}
-            isOpen={showCollectionEdit}
-            onRequestClose={() => setShowCollectionEdit(false)}
-          >
-            <CollectionEdit
-              onSubmit={() => setShowCollectionEdit(false)}
-              collectionId={collection.id}
-            />
-          </Modal>
-          <Modal
-            title={t("Export collection")}
-            isOpen={showCollectionExport}
-            onRequestClose={() => setShowCollectionExport(false)}
-          >
-            <CollectionExport
-              onSubmit={() => setShowCollectionExport(false)}
-              collection={collection}
-            />
-          </Modal>
-        </>
-      )}
     </>
   );
 }

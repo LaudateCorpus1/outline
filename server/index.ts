@@ -1,49 +1,40 @@
 /* eslint-disable import/order */
 import env from "./env";
 
-import "./logging/tracing"; // must come before importing any instrumented module
+import "./logging/tracer"; // must come before importing any instrumented module
 
 import http from "http";
 import https from "https";
 import Koa from "koa";
-import compress from "koa-compress";
 import helmet from "koa-helmet";
 import logger from "koa-logger";
-import onerror from "koa-onerror";
 import Router from "koa-router";
 import { uniq } from "lodash";
 import { AddressInfo } from "net";
 import stoppable from "stoppable";
 import throng from "throng";
-import Logger from "./logging/logger";
-import { requestErrorHandler } from "./logging/sentry";
+import Logger from "./logging/Logger";
 import services from "./services";
 import { getArg } from "./utils/args";
 import { getSSLOptions } from "./utils/ssl";
-import { checkEnv, checkMigrations } from "./utils/startup";
+import { defaultRateLimiter } from "@server/middlewares/rateLimiter";
+import { checkEnv, checkPendingMigrations } from "./utils/startup";
 import { checkUpdates } from "./utils/updates";
-
-// If a services flag is passed it takes priority over the enviroment variable
-// for example: --services=web,worker
-const normalizedServiceFlag = getArg("services");
+import onerror from "./onerror";
+import ShutdownHelper, { ShutdownOrder } from "./utils/ShutdownHelper";
+import { sequelize } from "./database/sequelize";
+import RedisAdapter from "./redis";
+import Metrics from "./logging/Metrics";
 
 // The default is to run all services to make development and OSS installations
 // easier to deal with. Separate services are only needed at scale.
 const serviceNames = uniq(
-  (
-    normalizedServiceFlag ||
-    env.SERVICES ||
-    "collaboration,websockets,worker,web"
-  )
-    .split(",")
-    .map((service) => service.trim())
+  env.SERVICES.split(",").map((service) => service.trim())
 );
 
 // The number of processes to run, defaults to the number of CPU's available
 // for the web service, and 1 for collaboration during the beta period.
-let processCount = env.WEB_CONCURRENCY
-  ? parseInt(env.WEB_CONCURRENCY, 10)
-  : undefined;
+let processCount = env.WEB_CONCURRENCY;
 
 if (serviceNames.includes("collaboration")) {
   if (processCount !== 1) {
@@ -57,11 +48,11 @@ if (serviceNames.includes("collaboration")) {
 }
 
 // This function will only be called once in the original process
-function master() {
-  checkEnv();
-  checkMigrations();
+async function master() {
+  await checkEnv();
+  await checkPendingMigrations();
 
-  if (env.ENABLE_UPDATES !== "false" && process.env.NODE_ENV === "production") {
+  if (env.TELEMETRY && env.ENVIRONMENT === "production") {
     checkUpdates();
     setInterval(checkUpdates, 24 * 3600 * 1000);
   }
@@ -79,24 +70,41 @@ async function start(id: number, disconnect: () => void) {
   const server = stoppable(
     useHTTPS
       ? https.createServer(ssl, app.callback())
-      : http.createServer(app.callback())
+      : http.createServer(app.callback()),
+    ShutdownHelper.connectionGraceTimeout
   );
   const router = new Router();
 
   // install basic middleware shared by all services
-  if ((env.DEBUG || "").includes("http")) {
+  if (env.DEBUG.includes("http")) {
     app.use(logger((str) => Logger.info("http", str)));
   }
 
-  app.use(compress());
   app.use(helmet());
 
   // catch errors in one place, automatically set status and response headers
   onerror(app);
-  app.on("error", requestErrorHandler);
 
-  // install health check endpoint for all services
-  router.get("/_health", (ctx) => (ctx.body = "OK"));
+  // Apply default rate limit to all routes
+  app.use(defaultRateLimiter());
+
+  // Add a health check endpoint to all services
+  router.get("/_health", async (ctx) => {
+    try {
+      await sequelize.query("SELECT 1");
+    } catch (err) {
+      throw new Error("Database connection failed");
+    }
+
+    try {
+      await RedisAdapter.defaultClient.ping();
+    } catch (err) {
+      throw new Error("Redis ping failed");
+    }
+
+    ctx.body = "OK";
+  });
+
   app.use(router.routes());
 
   // loop through requested services at startup
@@ -107,7 +115,7 @@ async function start(id: number, disconnect: () => void) {
 
     Logger.info("lifecycle", `Starting ${name} service`);
     const init = services[name];
-    await init(app, server);
+    await init(app, server, serviceNames);
   }
 
   server.on("error", (err) => {
@@ -123,15 +131,35 @@ async function start(id: number, disconnect: () => void) {
       }`
     );
   });
-  server.listen(normalizedPortFlag || env.PORT || "3000");
-  process.once("SIGTERM", shutdown);
-  process.once("SIGINT", shutdown);
 
-  function shutdown() {
-    Logger.info("lifecycle", "Stopping server");
-    server.emit("shutdown");
-    server.stop(disconnect);
-  }
+  server.listen(normalizedPortFlag || env.PORT || "3000");
+  server.setTimeout(env.REQUEST_TIMEOUT);
+
+  ShutdownHelper.add(
+    "server",
+    ShutdownOrder.last,
+    () =>
+      new Promise((resolve, reject) => {
+        // Calling stop prevents new connections from being accepted and waits for
+        // existing connections to close for the grace period before forcefully
+        // closing them.
+        server.stop((err, gracefully) => {
+          disconnect();
+
+          if (err) {
+            reject(err);
+          } else {
+            resolve(gracefully);
+          }
+        });
+      })
+  );
+
+  ShutdownHelper.add("metrics", ShutdownOrder.last, () => Metrics.flush());
+
+  // Handle shutdown signals
+  process.once("SIGTERM", () => ShutdownHelper.execute());
+  process.once("SIGINT", () => ShutdownHelper.execute());
 }
 
 throng({

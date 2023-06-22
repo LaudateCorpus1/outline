@@ -1,22 +1,18 @@
-import path from "path";
 import invariant from "invariant";
 import { find, orderBy, filter, compact, omitBy } from "lodash";
 import { observable, action, computed, runInAction } from "mobx";
-import { MAX_TITLE_LENGTH } from "@shared/constants";
-import { DateFilter } from "@shared/types";
+import { DateFilter, NavigationNode, PublicTeam } from "@shared/types";
 import { subtractDate } from "@shared/utils/date";
+import { bytesToHumanReadable } from "@shared/utils/files";
 import naturalSort from "@shared/utils/naturalSort";
+import { DocumentValidation } from "@shared/validations";
 import BaseStore from "~/stores/BaseStore";
 import RootStore from "~/stores/RootStore";
 import Document from "~/models/Document";
 import env from "~/env";
-import {
-  FetchOptions,
-  PaginationParams,
-  SearchResult,
-  NavigationNode,
-} from "~/types";
+import { FetchOptions, PaginationParams, SearchResult } from "~/types";
 import { client } from "~/utils/ApiClient";
+import { extname } from "~/utils/files";
 
 type FetchPageParams = PaginationParams & {
   template?: boolean;
@@ -39,7 +35,10 @@ type ImportOptions = {
 };
 
 export default class DocumentsStore extends BaseStore<Document> {
-  sharedTreeCache: Map<string, NavigationNode | undefined> = new Map();
+  sharedCache: Map<
+    string,
+    { sharedTree: NavigationNode; team: PublicTeam } | undefined
+  > = new Map();
 
   @observable
   searchCache: Map<string, SearchResult[] | undefined> = new Map();
@@ -139,7 +138,7 @@ export default class DocumentsStore extends BaseStore<Document> {
   rootInCollection(collectionId: string): Document[] {
     const collection = this.rootStore.collections.get(collectionId);
 
-    if (!collection) {
+    if (!collection || !collection.sortedDocuments) {
       return [];
     }
 
@@ -147,7 +146,7 @@ export default class DocumentsStore extends BaseStore<Document> {
 
     return compact([
       ...drafts,
-      ...collection.documents.map((node) => this.get(node.id)),
+      ...collection.sortedDocuments.map((node) => this.get(node.id)),
     ]);
   }
 
@@ -264,7 +263,7 @@ export default class DocumentsStore extends BaseStore<Document> {
   }
 
   getSharedTree(documentId: string): NavigationNode | undefined {
-    return this.sharedTreeCache.get(documentId);
+    return this.sharedCache.get(documentId)?.sharedTree;
   }
 
   @action
@@ -303,83 +302,97 @@ export default class DocumentsStore extends BaseStore<Document> {
   };
 
   @action
-  fetchArchived = async (options?: PaginationParams): Promise<any> => {
-    return this.fetchNamedPage("archived", options);
-  };
+  fetchArchived = async (options?: PaginationParams): Promise<Document[]> =>
+    this.fetchNamedPage("archived", options);
 
   @action
-  fetchDeleted = async (options?: PaginationParams): Promise<any> => {
-    return this.fetchNamedPage("deleted", options);
-  };
+  fetchDeleted = async (options?: PaginationParams): Promise<Document[]> =>
+    this.fetchNamedPage("deleted", options);
 
   @action
-  fetchRecentlyUpdated = async (options?: PaginationParams): Promise<any> => {
-    return this.fetchNamedPage("list", options);
-  };
+  fetchRecentlyUpdated = async (
+    options?: PaginationParams
+  ): Promise<Document[]> => this.fetchNamedPage("list", options);
 
   @action
-  fetchTemplates = async (options?: PaginationParams): Promise<any> => {
-    return this.fetchNamedPage("list", { ...options, template: true });
-  };
+  fetchTemplates = async (options?: PaginationParams): Promise<Document[]> =>
+    this.fetchNamedPage("list", { ...options, template: true });
 
   @action
-  fetchAlphabetical = async (options?: PaginationParams): Promise<any> => {
-    return this.fetchNamedPage("list", {
+  fetchAlphabetical = async (options?: PaginationParams): Promise<Document[]> =>
+    this.fetchNamedPage("list", {
       sort: "title",
       direction: "ASC",
       ...options,
     });
-  };
 
   @action
   fetchLeastRecentlyUpdated = async (
     options?: PaginationParams
-  ): Promise<any> => {
-    return this.fetchNamedPage("list", {
+  ): Promise<Document[]> =>
+    this.fetchNamedPage("list", {
       sort: "updatedAt",
       direction: "ASC",
       ...options,
     });
-  };
 
   @action
-  fetchRecentlyPublished = async (options?: PaginationParams): Promise<any> => {
-    return this.fetchNamedPage("list", {
+  fetchRecentlyPublished = async (
+    options?: PaginationParams
+  ): Promise<Document[]> =>
+    this.fetchNamedPage("list", {
       sort: "publishedAt",
       direction: "DESC",
       ...options,
     });
-  };
 
   @action
-  fetchRecentlyViewed = async (options?: PaginationParams): Promise<any> => {
-    return this.fetchNamedPage("viewed", options);
-  };
+  fetchRecentlyViewed = async (
+    options?: PaginationParams
+  ): Promise<Document[]> => this.fetchNamedPage("viewed", options);
 
   @action
-  fetchStarred = (options?: PaginationParams): Promise<any> => {
-    return this.fetchNamedPage("starred", options);
-  };
+  fetchStarred = (options?: PaginationParams): Promise<Document[]> =>
+    this.fetchNamedPage("starred", options);
 
   @action
-  fetchDrafts = (options?: PaginationParams): Promise<any> => {
-    return this.fetchNamedPage("drafts", options);
-  };
+  fetchDrafts = (options?: PaginationParams): Promise<Document[]> =>
+    this.fetchNamedPage("drafts", options);
 
   @action
-  fetchOwned = (options?: PaginationParams): Promise<any> => {
-    return this.fetchNamedPage("list", options);
-  };
+  fetchOwned = (options?: PaginationParams): Promise<Document[]> =>
+    this.fetchNamedPage("list", options);
 
   @action
-  searchTitles = async (query: string) => {
-    const res = await client.get("/documents.search_titles", {
+  searchTitles = async (query: string, options?: SearchParams) => {
+    const compactedOptions = omitBy(options, (o) => !o);
+    const res = await client.post("/documents.search_titles", {
+      ...compactedOptions,
       query,
     });
     invariant(res?.data, "Search response should be available");
+
     // add the documents and associated policies to the store
     res.data.forEach(this.add);
     this.addPolicies(res.policies);
+
+    // store a reference to the document model in the search cache instead
+    // of the original result from the API.
+    const results: SearchResult[] = compact(
+      res.data.map((result: SearchResult) => {
+        const document = this.data.get(result.id);
+        if (!document) {
+          return null;
+        }
+        return {
+          document,
+        };
+      })
+    );
+    const existing = this.searchCache.get(query) || [];
+    // splice modifies any existing results, taking into account pagination
+    existing.splice(0, existing.length, ...results);
+    this.searchCache.set(query, existing);
     return res.data;
   };
 
@@ -389,7 +402,7 @@ export default class DocumentsStore extends BaseStore<Document> {
     options: SearchParams
   ): Promise<SearchResult[]> => {
     const compactedOptions = omitBy(options, (o) => !o);
-    const res = await client.get("/documents.search", {
+    const res = await client.post("/documents.search", {
       ...compactedOptions,
       query,
     });
@@ -457,6 +470,7 @@ export default class DocumentsStore extends BaseStore<Document> {
     options: FetchOptions = {}
   ): Promise<{
     document: Document;
+    team?: PublicTeam;
     sharedTree?: NavigationNode;
   }> => {
     if (!options.prefetch) {
@@ -473,10 +487,10 @@ export default class DocumentsStore extends BaseStore<Document> {
           return {
             document: doc,
           };
-        } else if (this.sharedTreeCache.has(options.shareId)) {
+        } else if (this.sharedCache.has(options.shareId)) {
           return {
             document: doc,
-            sharedTree: this.sharedTreeCache.get(options.shareId),
+            ...this.sharedCache.get(options.shareId),
           };
         }
       }
@@ -495,10 +509,14 @@ export default class DocumentsStore extends BaseStore<Document> {
       invariant(document, "Document not available");
 
       if (options.shareId) {
-        this.sharedTreeCache.set(options.shareId, res.data.sharedTree);
+        this.sharedCache.set(options.shareId, {
+          sharedTree: res.data.sharedTree,
+          team: res.data.team,
+        });
         return {
           document,
           sharedTree: res.data.sharedTree,
+          team: res.data.team,
         };
       }
 
@@ -524,7 +542,7 @@ export default class DocumentsStore extends BaseStore<Document> {
         id: documentId,
         collectionId,
         parentDocumentId,
-        index: index,
+        index,
       });
       invariant(res?.data, "Data not available");
       res.data.documents.forEach(this.add);
@@ -539,13 +557,13 @@ export default class DocumentsStore extends BaseStore<Document> {
   duplicate = async (document: Document): Promise<Document> => {
     const append = " (duplicate)";
     const res = await client.post("/documents.create", {
-      publish: !!document.publishedAt,
-      parentDocumentId: document.parentDocumentId,
-      collectionId: document.collectionId,
-      template: document.template,
+      publish: document.isTemplate,
+      parentDocumentId: null,
+      collectionId: document.isTemplate ? document.collectionId : null,
+      template: document.isTemplate,
       title: `${document.title.slice(
         0,
-        MAX_TITLE_LENGTH - append.length
+        DocumentValidation.maxTitleLength - append.length
       )}${append}`,
       text: document.text,
     });
@@ -569,13 +587,17 @@ export default class DocumentsStore extends BaseStore<Document> {
     if (
       file.type &&
       !this.importFileTypes.includes(file.type) &&
-      !this.importFileTypes.includes(path.extname(file.name))
+      !this.importFileTypes.includes(extname(file.name))
     ) {
       throw new Error(`The selected file type is not supported (${file.type})`);
     }
 
     if (file.size > env.MAXIMUM_IMPORT_SIZE) {
-      throw new Error("The selected file was too large to import");
+      throw new Error(
+        `The selected file was larger than the ${bytesToHumanReadable(
+          env.MAXIMUM_IMPORT_SIZE
+        )} maximum size`
+      );
     }
 
     const title = file.name.replace(/\.[^/.]+$/, "");
@@ -622,7 +644,11 @@ export default class DocumentsStore extends BaseStore<Document> {
 
   @action
   removeCollectionDocuments(collectionId: string) {
-    const documents = this.inCollection(collectionId);
+    // drafts are to be detached from collection rather than deleted, hence excluded here
+    const documents = filter(
+      this.inCollection(collectionId),
+      (d) => !!d.publishedAt
+    );
     const documentIds = documents.map((doc) => doc.id);
     documentIds.forEach((id) => this.remove(id));
   }
@@ -640,18 +666,26 @@ export default class DocumentsStore extends BaseStore<Document> {
       publish?: boolean;
       done?: boolean;
       autosave?: boolean;
-      lastRevision: number;
     }
   ) {
-    const document = await super.update(params, options);
+    this.isSaving = true;
 
-    // Because the collection object contains the url and title
-    // we need to ensure they are updated there as well.
-    const collection = this.getCollectionForDocument(document);
-    if (collection) {
-      collection.updateDocument(document);
+    try {
+      const res = await client.post(`/${this.apiEndpoint}.update`, {
+        ...params,
+        ...options,
+        apiVersion: 2,
+      });
+
+      invariant(res?.data, "Data should be available");
+      this.addPolicies(res.policies);
+      const document = this.add(res.data.document);
+      const collection = this.getCollectionForDocument(document);
+      collection?.updateFromJson(res.data.collection);
+      return document;
+    } finally {
+      this.isSaving = false;
     }
-    return document;
   }
 
   @action
@@ -720,36 +754,52 @@ export default class DocumentsStore extends BaseStore<Document> {
   unpublish = async (document: Document) => {
     const res = await client.post("/documents.unpublish", {
       id: document.id,
+      apiVersion: 2,
     });
+
     runInAction("Document#unpublish", () => {
       invariant(res?.data, "Data should be available");
-      document.updateFromJson(res.data);
+      document.updateFromJson(res.data.document);
+      const collection = this.getCollectionForDocument(document);
+      collection?.updateFromJson(res.data.collection);
       this.addPolicies(res.policies);
     });
-    const collection = this.getCollectionForDocument(document);
-    if (collection) {
-      collection.refresh();
-    }
   };
 
-  star = async (document: Document) => {
-    await this.rootStore.stars.create({
+  star = (document: Document) =>
+    this.rootStore.stars.create({
       documentId: document.id,
     });
-  };
 
-  unstar = async (document: Document) => {
+  unstar = (document: Document) => {
     const star = this.rootStore.stars.orderedData.find(
       (star) => star.documentId === document.id
     );
-    await star?.delete();
+    return star?.delete();
   };
 
-  getByUrl = (url = ""): Document | null | undefined => {
-    return find(this.orderedData, (doc) => url.endsWith(doc.urlId));
+  subscribe = (document: Document) =>
+    this.rootStore.subscriptions.create({
+      documentId: document.id,
+      event: "documents.update",
+    });
+
+  unsubscribe = (userId: string, document: Document) => {
+    const subscription = this.rootStore.subscriptions.orderedData.find(
+      (subscription) =>
+        subscription.documentId === document.id &&
+        subscription.userId === userId
+    );
+
+    return subscription?.delete();
   };
+
+  getByUrl = (url = ""): Document | undefined =>
+    find(this.orderedData, (doc) => url.endsWith(doc.urlId));
 
   getCollectionForDocument(document: Document) {
-    return this.rootStore.collections.data.get(document.collectionId);
+    return document.collectionId
+      ? this.rootStore.collections.get(document.collectionId)
+      : undefined;
   }
 }
