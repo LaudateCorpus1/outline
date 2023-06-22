@@ -1,11 +1,13 @@
+import { LocationDescriptor } from "history";
 import * as React from "react";
 import styled, { useTheme } from "styled-components";
+import { s, ellipsis } from "@shared/styles";
 import Flex from "~/components/Flex";
 import NavLink from "~/components/NavLink";
 
-export type Props = {
+export type Props = Omit<React.HTMLAttributes<HTMLAnchorElement>, "title"> & {
   image?: React.ReactNode;
-  to?: string;
+  to?: LocationDescriptor;
   exact?: boolean;
   title: React.ReactNode;
   subtitle?: React.ReactNode;
@@ -51,7 +53,7 @@ const ListItem = (
         $border={border}
         $small={small}
         activeStyle={{
-          background: theme.primary,
+          background: theme.accent,
         }}
         {...rest}
         as={NavLink}
@@ -69,7 +71,11 @@ const ListItem = (
   );
 };
 
-const Wrapper = styled.a<{ $small?: boolean; $border?: boolean; to?: string }>`
+const Wrapper = styled.a<{
+  $small?: boolean;
+  $border?: boolean;
+  to?: LocationDescriptor;
+}>`
   display: flex;
   padding: ${(props) => (props.$border === false ? 0 : "8px 0")};
   margin: ${(props) =>
@@ -82,7 +88,7 @@ const Wrapper = styled.a<{ $small?: boolean; $border?: boolean; to?: string }>`
     border-bottom: 0;
   }
 
-  cursor: ${({ to }) => (to ? "pointer" : "default")};
+  cursor: ${({ to }) => (to ? "var(--pointer)" : "default")};
 `;
 
 const Image = styled(Flex)`
@@ -92,14 +98,13 @@ const Image = styled(Flex)`
   user-select: none;
   flex-shrink: 0;
   align-self: center;
+  color: ${s("text")};
 `;
 
 const Heading = styled.p<{ $small?: boolean }>`
   font-size: ${(props) => (props.$small ? 14 : 16)}px;
   font-weight: 500;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  overflow: hidden;
+  ${ellipsis()}
   line-height: ${(props) => (props.$small ? 1.3 : 1.2)};
   margin: 0;
 `;

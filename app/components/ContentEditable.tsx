@@ -1,6 +1,7 @@
 import isPrintableKeyEvent from "is-printable-key-event";
 import * as React from "react";
 import styled from "styled-components";
+import { s } from "@shared/styles";
 import useOnScreen from "~/hooks/useOnScreen";
 
 type Props = Omit<React.HTMLAttributes<HTMLSpanElement>, "ref" | "onChange"> & {
@@ -52,11 +53,17 @@ const ContentEditable = React.forwardRef(
   ) => {
     const contentRef = React.useRef<HTMLSpanElement>(null);
     const [innerValue, setInnerValue] = React.useState<string>(value);
-    const lastValue = React.useRef("");
+    const lastValue = React.useRef(value);
 
     React.useImperativeHandle(ref, () => ({
       focus: () => {
-        contentRef.current?.focus();
+        if (contentRef.current) {
+          contentRef.current.focus();
+          // looks unnecessary but required because of https://github.com/outline/outline/issues/5198
+          if (!contentRef.current.innerText) {
+            placeCaret(contentRef.current, true);
+          }
+        }
       },
       focusAtStart: () => {
         if (contentRef.current) {
@@ -78,27 +85,37 @@ const ContentEditable = React.forwardRef(
       },
     }));
 
-    const wrappedEvent = (
-      callback:
-        | React.FocusEventHandler<HTMLSpanElement>
-        | React.FormEventHandler<HTMLSpanElement>
-        | React.KeyboardEventHandler<HTMLSpanElement>
-        | undefined
-    ) => (event: any) => {
-      const text = contentRef.current?.innerText || "";
+    const wrappedEvent =
+      (
+        callback:
+          | React.FocusEventHandler<HTMLSpanElement>
+          | React.FormEventHandler<HTMLSpanElement>
+          | React.KeyboardEventHandler<HTMLSpanElement>
+          | undefined
+      ) =>
+      (event: any) => {
+        if (readOnly) {
+          return;
+        }
 
-      if (maxLength && isPrintableKeyEvent(event) && text.length >= maxLength) {
-        event?.preventDefault();
-        return;
-      }
+        const text = event.currentTarget.textContent || "";
 
-      if (text !== lastValue.current) {
-        lastValue.current = text;
-        onChange && onChange(text);
-      }
+        if (
+          maxLength &&
+          isPrintableKeyEvent(event) &&
+          text.length >= maxLength
+        ) {
+          event?.preventDefault();
+          return;
+        }
 
-      callback?.(event);
-    };
+        if (text !== lastValue.current) {
+          lastValue.current = text;
+          onChange?.(text);
+        }
+
+        callback?.(event);
+      };
 
     // This is to account for being within a React.Suspense boundary, in this
     // case the component may be rendered with display: none. React 18 may solve
@@ -113,13 +130,14 @@ const ContentEditable = React.forwardRef(
     }, [autoFocus, disabled, isVisible, readOnly, contentRef]);
 
     React.useEffect(() => {
-      if (value !== contentRef.current?.innerText) {
+      if (contentRef.current && value !== contentRef.current.textContent) {
         setInnerValue(value);
       }
     }, [value, contentRef]);
 
-    // Ensure only plain text can be pasted into title when pasting from another
-    // rich text editor
+    // Ensure only plain text can be pasted into input when pasting from another
+    // rich text source. Note: If `onPaste` prop is passed then it takes
+    // priority over this behavior.
     const handlePaste = React.useCallback(
       (event: React.ClipboardEvent<HTMLSpanElement>) => {
         event.preventDefault();
@@ -166,13 +184,14 @@ function placeCaret(element: HTMLElement, atStart: boolean) {
 }
 
 const Content = styled.span`
-  background: ${(props) => props.theme.background};
-  transition: ${(props) => props.theme.backgroundTransition};
-  color: ${(props) => props.theme.text};
-  -webkit-text-fill-color: ${(props) => props.theme.text};
+  background: ${s("background")};
+  transition: ${s("backgroundTransition")};
+  color: ${s("text")};
+  -webkit-text-fill-color: ${s("text")};
   outline: none;
   resize: none;
   cursor: text;
+  word-break: anywhere;
 
   &:empty {
     display: inline-block;
@@ -180,8 +199,8 @@ const Content = styled.span`
 
   &:empty::before {
     display: inline-block;
-    color: ${(props) => props.theme.placeholder};
-    -webkit-text-fill-color: ${(props) => props.theme.placeholder};
+    color: ${s("placeholder")};
+    -webkit-text-fill-color: ${s("placeholder")};
     content: attr(data-placeholder);
     pointer-events: none;
     height: 0;

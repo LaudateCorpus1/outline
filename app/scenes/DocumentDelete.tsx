@@ -8,7 +8,7 @@ import Flex from "~/components/Flex";
 import Text from "~/components/Text";
 import useStores from "~/hooks/useStores";
 import useToasts from "~/hooks/useToasts";
-import { collectionUrl, documentUrl } from "~/utils/routeHelpers";
+import { collectionPath, documentPath } from "~/utils/routeHelpers";
 
 type Props = {
   document: Document;
@@ -23,7 +23,12 @@ function DocumentDelete({ document, onSubmit }: Props) {
   const [isArchiving, setArchiving] = React.useState(false);
   const { showToast } = useToasts();
   const canArchive = !document.isDraft && !document.isArchived;
-  const collection = collections.get(document.collectionId);
+  const collection = document.collectionId
+    ? collections.get(document.collectionId)
+    : undefined;
+  const nestedDocumentsCount = collection
+    ? collection.getDocumentChildren(document.id).length
+    : 0;
   const handleSubmit = React.useCallback(
     async (ev: React.SyntheticEvent) => {
       ev.preventDefault();
@@ -40,13 +45,14 @@ function DocumentDelete({ document, onSubmit }: Props) {
             const parent = documents.get(document.parentDocumentId);
 
             if (parent) {
-              history.push(documentUrl(parent));
+              history.push(documentPath(parent));
+              onSubmit();
               return;
             }
           }
 
           // otherwise, redirect to the collection home
-          history.push(collectionUrl(collection?.url || "/"));
+          history.push(collectionPath(collection?.url || "/"));
         }
 
         onSubmit();
@@ -94,11 +100,23 @@ function DocumentDelete({ document, onSubmit }: Props) {
                 em: <strong />,
               }}
             />
-          ) : (
+          ) : nestedDocumentsCount < 1 ? (
             <Trans
-              defaults="Are you sure about that? Deleting the <em>{{ documentTitle }}</em> document will delete all of its history and any nested documents."
+              defaults="Are you sure about that? Deleting the <em>{{ documentTitle }}</em> document will delete all of its history</em>."
               values={{
                 documentTitle: document.titleWithDefault,
+              }}
+              components={{
+                em: <strong />,
+              }}
+            />
+          ) : (
+            <Trans
+              count={nestedDocumentsCount}
+              defaults="Are you sure about that? Deleting the <em>{{ documentTitle }}</em> document will delete all of its history and <em>{{ any }} nested document</em>."
+              values={{
+                documentTitle: document.titleWithDefault,
+                any: nestedDocumentsCount,
               }}
               components={{
                 em: <strong />,

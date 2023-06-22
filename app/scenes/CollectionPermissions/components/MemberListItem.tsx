@@ -1,16 +1,17 @@
+import { observer } from "mobx-react";
 import * as React from "react";
 import { Trans, useTranslation } from "react-i18next";
-import styled from "styled-components";
+import { CollectionPermission } from "@shared/types";
 import Membership from "~/models/Membership";
 import User from "~/models/User";
 import Avatar from "~/components/Avatar";
 import Badge from "~/components/Badge";
 import Button from "~/components/Button";
 import Flex from "~/components/Flex";
-import InputSelect, { Props as SelectProps } from "~/components/InputSelect";
 import ListItem from "~/components/List/Item";
 import Time from "~/components/Time";
 import MemberMenu from "~/menus/MemberMenu";
+import InputMemberPermissionSelect from "./InputMemberPermissionSelect";
 
 type Props = {
   user: User;
@@ -18,7 +19,7 @@ type Props = {
   canEdit: boolean;
   onAdd?: () => void;
   onRemove?: () => void;
-  onUpdate?: (permission: string) => void;
+  onUpdate?: (permission: CollectionPermission) => void;
 };
 
 const MemberListItem = ({
@@ -30,19 +31,6 @@ const MemberListItem = ({
   canEdit,
 }: Props) => {
   const { t } = useTranslation();
-  const PERMISSIONS = React.useMemo(
-    () => [
-      {
-        label: t("View only"),
-        value: "read",
-      },
-      {
-        label: t("View and edit"),
-        value: "read_write",
-      },
-    ],
-    [t]
-  );
 
   return (
     <ListItem
@@ -60,24 +48,19 @@ const MemberListItem = ({
           {user.isAdmin && <Badge primary={user.isAdmin}>{t("Admin")}</Badge>}
         </>
       }
-      image={<Avatar src={user.avatarUrl} size={32} />}
+      image={<Avatar model={user} size={32} />}
       actions={
         <Flex align="center" gap={8}>
           {onUpdate && (
-            <Select
-              label={t("Permissions")}
-              options={PERMISSIONS}
+            <InputMemberPermissionSelect
               value={membership ? membership.permission : undefined}
               onChange={onUpdate}
               disabled={!canEdit}
-              ariaLabel={t("Permissions")}
-              labelHidden
-              nude
             />
           )}
           {canEdit && (
             <>
-              {onRemove && <MemberMenu onRemove={onRemove} />}
+              {onRemove && <MemberMenu user={user} onRemove={onRemove} />}
               {onAdd && (
                 <Button onClick={onAdd} neutral>
                   {t("Add")}
@@ -91,16 +74,4 @@ const MemberListItem = ({
   );
 };
 
-const Select = styled(InputSelect)`
-  margin: 0;
-  font-size: 14px;
-  border-color: transparent;
-  box-shadow: none;
-  color: ${(props) => props.theme.textSecondary};
-
-  select {
-    margin: 0;
-  }
-` as React.ComponentType<SelectProps>;
-
-export default MemberListItem;
+export default observer(MemberListItem);

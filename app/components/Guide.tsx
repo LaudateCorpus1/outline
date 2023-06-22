@@ -1,8 +1,7 @@
-import { observer } from "mobx-react";
 import * as React from "react";
 import { Dialog, DialogBackdrop, useDialogState } from "reakit/Dialog";
 import styled from "styled-components";
-import { depths } from "@shared/styles";
+import { depths, s } from "@shared/styles";
 import Scrollable from "~/components/Scrollable";
 import usePrevious from "~/hooks/usePrevious";
 
@@ -72,7 +71,7 @@ const Backdrop = styled.div`
   left: 0;
   right: 0;
   bottom: 0;
-  background-color: ${(props) => props.theme.backdrop} !important;
+  background-color: ${s("backdrop")} !important;
   z-index: ${depths.modalOverlay};
   transition: opacity 200ms ease-in-out;
   opacity: 0;
@@ -93,8 +92,8 @@ const Scene = styled.div`
   justify-content: center;
   align-items: flex-start;
   width: 350px;
-  background: ${(props) => props.theme.background};
-  transition: ${(props) => props.theme.backgroundTransition};
+  background: ${s("background")};
+  transition: ${s("backgroundTransition")};
   border-radius: 8px;
   outline: none;
   opacity: 0;
@@ -112,4 +111,4 @@ const Content = styled(Scrollable)`
   padding: 16px;
 `;
 
-export default observer(Guide);
+export default Guide;

@@ -12,7 +12,7 @@ const Container = styled.div<Props>`
   padding: ${(props) => (props.withStickyHeader ? "4px 12px" : "60px 12px")};
 
   ${breakpoint("tablet")`
-    padding: ${(props: any) =>
+    padding: ${(props: Props) =>
       props.withStickyHeader ? "4px 44px 60px" : "60px 44px"};
   `};
 `;
@@ -26,12 +26,10 @@ const Content = styled.div`
   `};
 `;
 
-const CenteredContent: React.FC<Props> = ({ children, ...rest }) => {
-  return (
-    <Container {...rest}>
-      <Content>{children}</Content>
-    </Container>
-  );
-};
+const CenteredContent: React.FC<Props> = ({ children, ...rest }) => (
+  <Container {...rest}>
+    <Content>{children}</Content>
+  </Container>
+);
 
 export default CenteredContent;

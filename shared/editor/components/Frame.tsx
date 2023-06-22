@@ -4,6 +4,7 @@ import { OpenIcon } from "outline-icons";
 import * as React from "react";
 import styled from "styled-components";
 import { Optional } from "utility-types";
+import { s } from "../../styles";
 
 type Props = Omit<Optional<HTMLIFrameElement>, "children"> & {
   src?: string;
@@ -30,7 +31,7 @@ class Frame extends React.Component<PropsWithRef> {
 
   componentDidMount() {
     this.mounted = true;
-    setImmediate(this.loadIframe);
+    setTimeout(this.loadIframe, 0);
   }
 
   componentWillUnmount() {
@@ -55,6 +56,7 @@ class Frame extends React.Component<PropsWithRef> {
       canonicalUrl,
       isSelected,
       referrerPolicy,
+      className = "",
       src,
     } = this.props;
     const withBar = !!(icon || canonicalUrl);
@@ -65,13 +67,15 @@ class Frame extends React.Component<PropsWithRef> {
         height={height}
         $withBar={withBar}
         $border={border}
-        className={isSelected ? "ProseMirror-selectednode" : ""}
+        className={
+          isSelected ? `ProseMirror-selectednode ${className}` : className
+        }
       >
         {this.isLoaded && (
           <Iframe
             ref={forwardedRef}
             $withBar={withBar}
-            sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+            sandbox="allow-same-origin allow-scripts allow-popups allow-forms allow-downloads"
             width={width}
             height={height}
             frameBorder="0"
@@ -91,7 +95,7 @@ class Frame extends React.Component<PropsWithRef> {
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                <OpenIcon color="currentColor" size={18} /> Open
+                <OpenIcon size={18} /> Open
               </Open>
             )}
           </Bar>
@@ -121,7 +125,7 @@ const Rounded = styled.div<{
 `;
 
 const Open = styled.a`
-  color: ${(props) => props.theme.textSecondary} !important;
+  color: ${s("textSecondary")} !important;
   font-size: 13px;
   font-weight: 500;
   align-items: center;
@@ -141,12 +145,13 @@ const Bar = styled.div`
   display: flex;
   align-items: center;
   border-top: 1px solid ${(props) => props.theme.embedBorder};
-  background: ${(props) => props.theme.secondaryBackground};
-  color: ${(props) => props.theme.textSecondary};
+  background: ${s("secondaryBackground")};
+  color: ${s("textSecondary")};
   padding: 0 8px;
   border-bottom-left-radius: 6px;
   border-bottom-right-radius: 6px;
   user-select: none;
+  position: relative;
 `;
 
 export default React.forwardRef<HTMLIFrameElement, Props>((props, ref) => (

@@ -1,9 +1,13 @@
+import { LocationDescriptor } from "history";
 import * as React from "react";
 import styled, { useTheme, css } from "styled-components";
 import breakpoint from "styled-components-breakpoint";
+import { s } from "@shared/styles";
+import { NavigationNode } from "@shared/types";
 import EventBoundary from "~/components/EventBoundary";
 import NudeButton from "~/components/NudeButton";
-import { NavigationNode } from "~/types";
+import useUnmount from "~/hooks/useUnmount";
+import { undraggableOnDesktop } from "~/styles";
 import Disclosure from "./Disclosure";
 import NavLink, { Props as NavLinkProps } from "./NavLink";
 
@@ -14,11 +18,11 @@ export type DragObject = NavigationNode & {
 };
 
 type Props = Omit<NavLinkProps, "to"> & {
-  to?: string | Record<string, any>;
-  href?: string | Record<string, any>;
+  to?: LocationDescriptor;
   innerRef?: (ref: HTMLElement | null | undefined) => void;
   onClick?: React.MouseEventHandler<HTMLAnchorElement>;
-  onMouseEnter?: React.MouseEventHandler<HTMLAnchorElement>;
+  /* Callback when we expect the user to click on the link. Used for prefetching data. */
+  onClickIntent?: () => void;
   onDisclosureClick?: React.MouseEventHandler<HTMLButtonElement>;
   icon?: React.ReactNode;
   label?: React.ReactNode;
@@ -42,7 +46,7 @@ function SidebarLink(
   {
     icon,
     onClick,
-    onMouseEnter,
+    onClickIntent,
     to,
     label,
     active,
@@ -61,6 +65,7 @@ function SidebarLink(
   }: Props,
   ref: React.RefObject<HTMLAnchorElement>
 ) {
+  const timer = React.useRef<number>();
   const theme = useTheme();
   const style = React.useMemo(
     () => ({
@@ -79,6 +84,28 @@ function SidebarLink(
     [theme.text, theme.sidebarActiveBackground, style]
   );
 
+  const handleMouseEnter = React.useCallback(() => {
+    if (timer.current) {
+      clearTimeout(timer.current);
+    }
+
+    if (onClickIntent) {
+      timer.current = window.setTimeout(onClickIntent, 100);
+    }
+  }, [onClickIntent]);
+
+  const handleMouseLeave = React.useCallback(() => {
+    if (timer.current) {
+      clearTimeout(timer.current);
+    }
+  }, []);
+
+  useUnmount(() => {
+    if (timer.current) {
+      clearTimeout(timer.current);
+    }
+  });
+
   return (
     <>
       <Link
@@ -88,7 +115,8 @@ function SidebarLink(
         activeStyle={isActiveDrop ? activeDropStyle : activeStyle}
         style={active ? activeStyle : style}
         onClick={onClick}
-        onMouseEnter={onMouseEnter}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
         // @ts-expect-error exact does not exist on div
         exact={exact !== false}
         to={to}
@@ -104,6 +132,7 @@ function SidebarLink(
               expanded={expanded}
               onClick={onDisclosureClick}
               root={depth === 0}
+              tabIndex={-1}
             />
           )}
           {icon && <IconWrapper>{icon}</IconWrapper>}
@@ -142,12 +171,12 @@ const Actions = styled(EventBoundary)<{ showActions?: boolean }>`
   top: 4px;
   right: 4px;
   gap: 4px;
-  color: ${(props) => props.theme.textTertiary};
+  color: ${s("textTertiary")};
   transition: opacity 50ms;
   height: 24px;
 
   svg {
-    color: ${(props) => props.theme.textSecondary};
+    color: ${s("textSecondary")};
     fill: currentColor;
     opacity: 0.5;
   }
@@ -178,8 +207,9 @@ const Link = styled(NavLink)<{
   color: ${(props) =>
     props.$isActiveDrop ? props.theme.white : props.theme.sidebarText};
   font-size: 16px;
-  cursor: pointer;
+  cursor: var(--pointer);
   overflow: hidden;
+  ${undraggableOnDesktop()}
 
   ${(props) =>
     props.$disabled &&
@@ -191,8 +221,17 @@ const Link = styled(NavLink)<{
   ${(props) =>
     props.$isDraft &&
     css`
-      padding: 4px 14px;
-      border: 1px dashed ${props.theme.sidebarDraftBorder};
+      &:after {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        pointer-events: none;
+        border-radius: 4px;
+        border: 1.5px dashed ${props.theme.sidebarDraftBorder};
+      }
     `}
 
   svg {
@@ -205,25 +244,25 @@ const Link = styled(NavLink)<{
   }
 
   & + ${Actions} {
-    background: ${(props) => props.theme.sidebarBackground};
+    background: ${s("sidebarBackground")};
 
     ${NudeButton} {
       background: transparent;
 
       &:hover,
       &[aria-expanded="true"] {
-        background: ${(props) => props.theme.sidebarControlHoverBackground};
+        background: ${s("sidebarControlHoverBackground")};
       }
     }
   }
 
   &[aria-current="page"] + ${Actions} {
-    background: ${(props) => props.theme.sidebarActiveBackground};
+    background: ${s("sidebarActiveBackground")};
   }
 
   ${breakpoint("tablet")`
     padding: 4px 8px 4px 16px;
-    font-size: 15px;
+    font-size: 14px;
   `}
 
   @media (hover: hover) {

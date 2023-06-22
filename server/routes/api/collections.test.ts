@@ -1,6 +1,6 @@
-import TestServer from "fetch-test-server";
+import { CollectionPermission } from "@shared/types";
+import { colorPalette } from "@shared/utils/collections";
 import { Document, CollectionUser, CollectionGroup } from "@server/models";
-import webService from "@server/services/web";
 import {
   buildUser,
   buildAdmin,
@@ -8,12 +8,9 @@ import {
   buildCollection,
   buildDocument,
 } from "@server/test/factories";
-import { flushdb, seed } from "@server/test/support";
+import { seed, getTestServer } from "@server/test/support";
 
-const app = webService();
-const server = new TestServer(app.callback());
-beforeEach(() => flushdb());
-afterAll(() => server.close());
+const server = getTestServer();
 
 describe("#collections.list", () => {
   it("should require authentication", async () => {
@@ -100,7 +97,7 @@ describe("#collections.list", () => {
     });
     await collection.$add("group", group, {
       through: {
-        permission: "read",
+        permission: CollectionPermission.Read,
         createdById: user.id,
       },
     });
@@ -292,7 +289,7 @@ describe("#collections.export", () => {
       createdById: admin.id,
       collectionId: collection.id,
       userId: admin.id,
-      permission: "read_write",
+      permission: CollectionPermission.ReadWrite,
     });
     const res = await server.post("/api/collections.export", {
       body: {
@@ -319,7 +316,7 @@ describe("#collections.export", () => {
     });
     await collection.$add("group", group, {
       through: {
-        permission: "read_write",
+        permission: CollectionPermission.ReadWrite,
         createdById: admin.id,
       },
     });
@@ -399,18 +396,18 @@ describe("#collections.export_all", () => {
 
 describe("#collections.add_user", () => {
   it("should add user to collection", async () => {
-    const user = await buildUser();
+    const admin = await buildAdmin();
     const collection = await buildCollection({
-      teamId: user.teamId,
-      userId: user.id,
+      teamId: admin.teamId,
+      userId: admin.id,
       permission: null,
     });
     const anotherUser = await buildUser({
-      teamId: user.teamId,
+      teamId: admin.teamId,
     });
     const res = await server.post("/api/collections.add_user", {
       body: {
-        token: user.getJwtToken(),
+        token: admin.getJwtToken(),
         id: collection.id,
         userId: anotherUser.id,
       },
@@ -418,6 +415,24 @@ describe("#collections.add_user", () => {
     const users = await collection.$get("users");
     expect(res.status).toEqual(200);
     expect(users.length).toEqual(2);
+  });
+
+  it("should not allow add self", async () => {
+    const user = await buildUser();
+    const collection = await buildCollection({
+      teamId: user.teamId,
+      permission: null,
+    });
+    const res = await server.post("/api/collections.add_user", {
+      body: {
+        token: user.getJwtToken(),
+        id: collection.id,
+        userId: user.id,
+      },
+    });
+    const body = await res.json();
+    expect(res.status).toEqual(403);
+    expect(body).toMatchSnapshot();
   });
 
   it("should require user in team", async () => {
@@ -601,25 +616,25 @@ describe("#collections.remove_group", () => {
 
 describe("#collections.remove_user", () => {
   it("should remove user from collection", async () => {
-    const user = await buildUser();
+    const admin = await buildAdmin();
     const collection = await buildCollection({
-      teamId: user.teamId,
-      userId: user.id,
+      teamId: admin.teamId,
+      userId: admin.id,
       permission: null,
     });
     const anotherUser = await buildUser({
-      teamId: user.teamId,
+      teamId: admin.teamId,
     });
     await server.post("/api/collections.add_user", {
       body: {
-        token: user.getJwtToken(),
+        token: admin.getJwtToken(),
         id: collection.id,
         userId: anotherUser.id,
       },
     });
     const res = await server.post("/api/collections.remove_user", {
       body: {
-        token: user.getJwtToken(),
+        token: admin.getJwtToken(),
         id: collection.id,
         userId: anotherUser.id,
       },
@@ -670,48 +685,6 @@ describe("#collections.remove_user", () => {
   });
 });
 
-describe("#collections.users", () => {
-  it("should return users in private collection", async () => {
-    const { collection, user } = await seed();
-    collection.permission = null;
-    await collection.save();
-    await CollectionUser.create({
-      createdById: user.id,
-      collectionId: collection.id,
-      userId: user.id,
-      permission: "read",
-    });
-    const res = await server.post("/api/collections.users", {
-      body: {
-        token: user.getJwtToken(),
-        id: collection.id,
-      },
-    });
-    const body = await res.json();
-    expect(res.status).toEqual(200);
-    expect(body.data.length).toEqual(1);
-  });
-
-  it("should require authentication", async () => {
-    const res = await server.post("/api/collections.users");
-    const body = await res.json();
-    expect(res.status).toEqual(401);
-    expect(body).toMatchSnapshot();
-  });
-
-  it("should require authorization", async () => {
-    const { collection } = await seed();
-    const user = await buildUser();
-    const res = await server.post("/api/collections.users", {
-      body: {
-        token: user.getJwtToken(),
-        id: collection.id,
-      },
-    });
-    expect(res.status).toEqual(403);
-  });
-});
-
 describe("#collections.group_memberships", () => {
   it("should return groups in private collection", async () => {
     const user = await buildUser();
@@ -726,13 +699,13 @@ describe("#collections.group_memberships", () => {
       createdById: user.id,
       collectionId: collection.id,
       userId: user.id,
-      permission: "read_write",
+      permission: CollectionPermission.ReadWrite,
     });
     await CollectionGroup.create({
       createdById: user.id,
       collectionId: collection.id,
       groupId: group.id,
-      permission: "read_write",
+      permission: CollectionPermission.ReadWrite,
     });
     const res = await server.post("/api/collections.group_memberships", {
       body: {
@@ -746,7 +719,7 @@ describe("#collections.group_memberships", () => {
     expect(body.data.groups[0].id).toEqual(group.id);
     expect(body.data.collectionGroupMemberships.length).toEqual(1);
     expect(body.data.collectionGroupMemberships[0].permission).toEqual(
-      "read_write"
+      CollectionPermission.ReadWrite
     );
   });
 
@@ -768,19 +741,19 @@ describe("#collections.group_memberships", () => {
       createdById: user.id,
       collectionId: collection.id,
       userId: user.id,
-      permission: "read_write",
+      permission: CollectionPermission.ReadWrite,
     });
     await CollectionGroup.create({
       createdById: user.id,
       collectionId: collection.id,
       groupId: group.id,
-      permission: "read_write",
+      permission: CollectionPermission.ReadWrite,
     });
     await CollectionGroup.create({
       createdById: user.id,
       collectionId: collection.id,
       groupId: group2.id,
-      permission: "read_write",
+      permission: CollectionPermission.ReadWrite,
     });
     const res = await server.post("/api/collections.group_memberships", {
       body: {
@@ -811,25 +784,25 @@ describe("#collections.group_memberships", () => {
       createdById: user.id,
       collectionId: collection.id,
       userId: user.id,
-      permission: "read_write",
+      permission: CollectionPermission.ReadWrite,
     });
     await CollectionGroup.create({
       createdById: user.id,
       collectionId: collection.id,
       groupId: group.id,
-      permission: "read_write",
+      permission: CollectionPermission.ReadWrite,
     });
     await CollectionGroup.create({
       createdById: user.id,
       collectionId: collection.id,
       groupId: group2.id,
-      permission: "maintainer",
+      permission: CollectionPermission.Read,
     });
     const res = await server.post("/api/collections.group_memberships", {
       body: {
         token: user.getJwtToken(),
         id: collection.id,
-        permission: "maintainer",
+        permission: CollectionPermission.Read,
       },
     });
     const body = await res.json();
@@ -866,12 +839,7 @@ describe("#collections.memberships", () => {
     const { collection, user } = await seed();
     collection.permission = null;
     await collection.save();
-    await CollectionUser.create({
-      createdById: user.id,
-      collectionId: collection.id,
-      userId: user.id,
-      permission: "read_write",
-    });
+
     const res = await server.post("/api/collections.memberships", {
       body: {
         token: user.getJwtToken(),
@@ -883,7 +851,9 @@ describe("#collections.memberships", () => {
     expect(body.data.users.length).toEqual(1);
     expect(body.data.users[0].id).toEqual(user.id);
     expect(body.data.memberships.length).toEqual(1);
-    expect(body.data.memberships[0].permission).toEqual("read_write");
+    expect(body.data.memberships[0].permission).toEqual(
+      CollectionPermission.Admin
+    );
   });
 
   it("should allow filtering members in collection by name", async () => {
@@ -892,16 +862,10 @@ describe("#collections.memberships", () => {
       name: "Won't find",
     });
     await CollectionUser.create({
-      createdById: user.id,
-      collectionId: collection.id,
-      userId: user.id,
-      permission: "read_write",
-    });
-    await CollectionUser.create({
       createdById: user2.id,
       collectionId: collection.id,
       userId: user2.id,
-      permission: "read_write",
+      permission: CollectionPermission.ReadWrite,
     });
     const res = await server.post("/api/collections.memberships", {
       body: {
@@ -923,19 +887,19 @@ describe("#collections.memberships", () => {
       createdById: user.id,
       collectionId: collection.id,
       userId: user.id,
-      permission: "read_write",
+      permission: CollectionPermission.ReadWrite,
     });
     await CollectionUser.create({
       createdById: user2.id,
       collectionId: collection.id,
       userId: user2.id,
-      permission: "maintainer",
+      permission: CollectionPermission.Read,
     });
     const res = await server.post("/api/collections.memberships", {
       body: {
         token: user.getJwtToken(),
         id: collection.id,
-        permission: "maintainer",
+        permission: CollectionPermission.Read,
       },
     });
     const body = await res.json();
@@ -982,6 +946,12 @@ describe("#collections.info", () => {
     const { user, collection } = await seed();
     collection.permission = null;
     await collection.save();
+    await CollectionUser.destroy({
+      where: {
+        collectionId: collection.id,
+        userId: user.id,
+      },
+    });
     const res = await server.post("/api/collections.info", {
       body: {
         token: user.getJwtToken(),
@@ -999,7 +969,7 @@ describe("#collections.info", () => {
       collectionId: collection.id,
       userId: user.id,
       createdById: user.id,
-      permission: "read",
+      permission: CollectionPermission.Read,
     });
     const res = await server.post("/api/collections.info", {
       body: {
@@ -1054,6 +1024,7 @@ describe("#collections.create", () => {
     expect(body.data.name).toBe("Test");
     expect(body.data.sort.field).toBe("index");
     expect(body.data.sort.direction).toBe("asc");
+    expect(colorPalette.includes(body.data.color)).toBeTruthy();
     expect(body.policies.length).toBe(1);
     expect(body.policies[0].abilities.read).toBeTruthy();
   });
@@ -1205,10 +1176,10 @@ describe("#collections.update", () => {
   });
 
   it("allows editing non-private collection", async () => {
-    const { user, collection } = await seed();
+    const { admin, collection } = await seed();
     const res = await server.post("/api/collections.update", {
       body: {
-        token: user.getJwtToken(),
+        token: admin.getJwtToken(),
         id: collection.id,
         name: "Test",
       },
@@ -1220,14 +1191,14 @@ describe("#collections.update", () => {
   });
 
   it("allows editing sort", async () => {
-    const { user, collection } = await seed();
+    const { admin, collection } = await seed();
     const sort = {
       field: "index",
       direction: "desc",
     };
     const res = await server.post("/api/collections.update", {
       body: {
-        token: user.getJwtToken(),
+        token: admin.getJwtToken(),
         id: collection.id,
         sort,
       },
@@ -1239,10 +1210,10 @@ describe("#collections.update", () => {
   });
 
   it("allows editing individual fields", async () => {
-    const { user, collection } = await seed();
+    const { admin, collection } = await seed();
     const res = await server.post("/api/collections.update", {
       body: {
-        token: user.getJwtToken(),
+        token: admin.getJwtToken(),
         id: collection.id,
         permission: null,
       },
@@ -1254,10 +1225,10 @@ describe("#collections.update", () => {
   });
 
   it("allows editing from non-private to private collection, and trims whitespace", async () => {
-    const { user, collection } = await seed();
+    const { admin, collection } = await seed();
     const res = await server.post("/api/collections.update", {
       body: {
-        token: user.getJwtToken(),
+        token: admin.getJwtToken(),
         id: collection.id,
         permission: null,
         name: "  Test  ",
@@ -1273,45 +1244,45 @@ describe("#collections.update", () => {
   });
 
   it("allows editing from private to non-private collection", async () => {
-    const { user, collection } = await seed();
+    const { admin, collection } = await seed();
     collection.permission = null;
     await collection.save();
     await CollectionUser.create({
       collectionId: collection.id,
-      userId: user.id,
-      createdById: user.id,
-      permission: "read_write",
+      userId: admin.id,
+      createdById: admin.id,
+      permission: CollectionPermission.ReadWrite,
     });
     const res = await server.post("/api/collections.update", {
       body: {
-        token: user.getJwtToken(),
+        token: admin.getJwtToken(),
         id: collection.id,
-        permission: "read_write",
+        permission: CollectionPermission.ReadWrite,
         name: "Test",
       },
     });
     const body = await res.json();
     expect(res.status).toEqual(200);
     expect(body.data.name).toBe("Test");
-    expect(body.data.permission).toBe("read_write");
+    expect(body.data.permission).toBe(CollectionPermission.ReadWrite);
     // ensure we return with a write level policy
     expect(body.policies.length).toBe(1);
     expect(body.policies[0].abilities.update).toBe(true);
   });
 
   it("allows editing by read-write collection user", async () => {
-    const { user, collection } = await seed();
+    const { admin, collection } = await seed();
     collection.permission = null;
     await collection.save();
     await CollectionUser.create({
       collectionId: collection.id,
-      userId: user.id,
-      createdById: user.id,
-      permission: "read_write",
+      userId: admin.id,
+      createdById: admin.id,
+      permission: CollectionPermission.ReadWrite,
     });
     const res = await server.post("/api/collections.update", {
       body: {
-        token: user.getJwtToken(),
+        token: admin.getJwtToken(),
         id: collection.id,
         name: "Test",
       },
@@ -1322,7 +1293,7 @@ describe("#collections.update", () => {
     expect(body.policies.length).toBe(1);
   });
 
-  it("allows editing by read-write collection group user", async () => {
+  it("allows editing by admin collection group user", async () => {
     const user = await buildUser();
     const collection = await buildCollection({
       permission: null,
@@ -1338,7 +1309,7 @@ describe("#collections.update", () => {
     });
     await collection.$add("group", group, {
       through: {
-        permission: "read_write",
+        permission: CollectionPermission.Admin,
         createdById: user.id,
       },
     });
@@ -1359,12 +1330,18 @@ describe("#collections.update", () => {
     const { user, collection } = await seed();
     collection.permission = null;
     await collection.save();
-    await CollectionUser.create({
-      collectionId: collection.id,
-      userId: user.id,
-      createdById: user.id,
-      permission: "read",
-    });
+    await CollectionUser.update(
+      {
+        createdById: user.id,
+        permission: CollectionPermission.Read,
+      },
+      {
+        where: {
+          collectionId: collection.id,
+          userId: user.id,
+        },
+      }
+    );
     const res = await server.post("/api/collections.update", {
       body: {
         token: user.getJwtToken(),
@@ -1376,14 +1353,14 @@ describe("#collections.update", () => {
   });
 
   it("does not allow setting unknown sort fields", async () => {
-    const { user, collection } = await seed();
+    const { admin, collection } = await seed();
     const sort = {
       field: "blah",
       direction: "desc",
     };
     const res = await server.post("/api/collections.update", {
       body: {
-        token: user.getJwtToken(),
+        token: admin.getJwtToken(),
         id: collection.id,
         sort,
       },
@@ -1392,14 +1369,14 @@ describe("#collections.update", () => {
   });
 
   it("does not allow setting unknown sort directions", async () => {
-    const { user, collection } = await seed();
+    const { admin, collection } = await seed();
     const sort = {
       field: "title",
       direction: "blah",
     };
     const res = await server.post("/api/collections.update", {
       body: {
-        token: user.getJwtToken(),
+        token: admin.getJwtToken(),
         id: collection.id,
         sort,
       },
@@ -1429,10 +1406,10 @@ describe("#collections.delete", () => {
   });
 
   it("should not allow deleting last collection", async () => {
-    const { user, collection } = await seed();
+    const { admin, collection } = await seed();
     const res = await server.post("/api/collections.delete", {
       body: {
-        token: user.getJwtToken(),
+        token: admin.getJwtToken(),
         id: collection.id,
       },
     });
@@ -1440,15 +1417,15 @@ describe("#collections.delete", () => {
   });
 
   it("should delete collection", async () => {
-    const { user, collection } = await seed();
+    const { admin, collection } = await seed();
     // to ensure it isn't the last collection
     await buildCollection({
-      teamId: user.teamId,
-      createdById: user.id,
+      teamId: admin.teamId,
+      createdById: admin.id,
     });
     const res = await server.post("/api/collections.delete", {
       body: {
-        token: user.getJwtToken(),
+        token: admin.getJwtToken(),
         id: collection.id,
       },
     });
@@ -1458,11 +1435,11 @@ describe("#collections.delete", () => {
   });
 
   it("should delete published documents", async () => {
-    const { user, collection } = await seed();
+    const { admin, collection } = await seed();
     // to ensure it isn't the last collection
     await buildCollection({
-      teamId: user.teamId,
-      createdById: user.id,
+      teamId: admin.teamId,
+      createdById: admin.id,
     });
     // archived document should not be deleted
     await buildDocument({
@@ -1471,7 +1448,7 @@ describe("#collections.delete", () => {
     });
     const res = await server.post("/api/collections.delete", {
       body: {
-        token: user.getJwtToken(),
+        token: admin.getJwtToken(),
         id: collection.id,
       },
     });
@@ -1487,7 +1464,7 @@ describe("#collections.delete", () => {
     ).toEqual(1);
   });
 
-  it("allows deleting by read-write collection group user", async () => {
+  it("allows deleting by admin collection group user", async () => {
     const user = await buildUser();
     const collection = await buildCollection({
       permission: null,
@@ -1506,7 +1483,7 @@ describe("#collections.delete", () => {
     });
     await collection.$add("group", group, {
       through: {
-        permission: "read_write",
+        permission: CollectionPermission.Admin,
         createdById: user.id,
       },
     });

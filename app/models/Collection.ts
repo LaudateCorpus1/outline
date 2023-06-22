@@ -1,9 +1,14 @@
 import { trim } from "lodash";
-import { action, computed, observable } from "mobx";
-import CollectionsStore from "~/stores/CollectionsStore";
+import { action, computed, observable, reaction, runInAction } from "mobx";
+import {
+  CollectionPermission,
+  FileOperationFormat,
+  NavigationNode,
+} from "@shared/types";
+import { sortNavigationNodes } from "@shared/utils/collections";
+import type CollectionsStore from "~/stores/CollectionsStore";
 import Document from "~/models/Document";
 import ParanoidModel from "~/models/ParanoidModel";
-import { NavigationNode } from "~/types";
 import { client } from "~/utils/ApiClient";
 import Field from "./decorators/Field";
 
@@ -13,8 +18,7 @@ export default class Collection extends ParanoidModel {
   @observable
   isSaving: boolean;
 
-  @observable
-  isLoadingUsers: boolean;
+  isFetching = false;
 
   @Field
   @observable
@@ -38,7 +42,7 @@ export default class Collection extends ParanoidModel {
 
   @Field
   @observable
-  permission: "read" | "read_write" | void;
+  permission: CollectionPermission | void;
 
   @Field
   @observable
@@ -55,32 +59,49 @@ export default class Collection extends ParanoidModel {
     direction: "asc" | "desc";
   };
 
-  documents: NavigationNode[];
+  @observable
+  documents?: NavigationNode[];
 
   url: string;
 
   urlId: string;
 
+  constructor(fields: Partial<Collection>, store: CollectionsStore) {
+    super(fields, store);
+
+    const resetDocumentPolicies = () => {
+      this.store.rootStore.documents
+        .inCollection(this.id)
+        .forEach((document) => {
+          this.store.rootStore.policies.remove(document.id);
+        });
+    };
+
+    reaction(() => this.permission, resetDocumentPolicies);
+    reaction(() => this.sharing, resetDocumentPolicies);
+  }
+
   @computed
-  get isEmpty(): boolean {
+  get isEmpty(): boolean | undefined {
+    if (!this.documents) {
+      return undefined;
+    }
+
     return (
       this.documents.length === 0 &&
       this.store.rootStore.documents.inCollection(this.id).length === 0
     );
   }
 
-  @computed
-  get documentIds(): string[] {
-    const results: string[] = [];
-
-    const travelNodes = (nodes: NavigationNode[]) =>
-      nodes.forEach((node) => {
-        results.push(node.id);
-        travelNodes(node.children);
-      });
-
-    travelNodes(this.documents);
-    return results;
+  /**
+   * Convenience method to return if a collection is considered private.
+   * This means that a membership is required to view it rather than just being
+   * a workspace member.
+   *
+   * @returns boolean
+   */
+  get isPrivate(): boolean {
+    return !this.permission;
   }
 
   @computed
@@ -95,8 +116,48 @@ export default class Collection extends ParanoidModel {
     );
   }
 
+  @computed
+  get sortedDocuments(): NavigationNode[] | undefined {
+    if (!this.documents) {
+      return undefined;
+    }
+    return sortNavigationNodes(this.documents, this.sort);
+  }
+
+  fetchDocuments = async (options?: { force: boolean }) => {
+    if (this.isFetching) {
+      return;
+    }
+    if (this.documents && options?.force !== true) {
+      return;
+    }
+
+    try {
+      this.isFetching = true;
+      const { data } = await client.post("/collections.documents", {
+        id: this.id,
+      });
+
+      runInAction("Collection#fetchDocuments", () => {
+        this.documents = data;
+      });
+    } finally {
+      this.isFetching = false;
+    }
+  };
+
+  /**
+   * Updates the document identified by the given id in the collection in memory.
+   * Does not update the document in the database.
+   *
+   * @param document The document properties stored in the collection
+   */
   @action
-  updateDocument(document: Document) {
+  updateDocument(document: Pick<Document, "id" | "title" | "url">) {
+    if (!this.documents) {
+      return;
+    }
+
     const travelNodes = (nodes: NavigationNode[]) =>
       nodes.forEach((node) => {
         if (node.id === document.id) {
@@ -108,6 +169,31 @@ export default class Collection extends ParanoidModel {
       });
 
     travelNodes(this.documents);
+  }
+
+  /**
+   * Removes the document identified by the given id from the collection in
+   * memory. Does not remove the document from the database.
+   *
+   * @param documentId The id of the document to remove.
+   */
+  @action
+  removeDocument(documentId: string) {
+    if (!this.documents) {
+      return;
+    }
+
+    this.documents = this.documents.filter(function f(node): boolean {
+      if (node.id === documentId) {
+        return false;
+      }
+
+      if (node.children) {
+        node.children = node.children.filter(f);
+      }
+
+      return true;
+    });
   }
 
   @action
@@ -129,16 +215,19 @@ export default class Collection extends ParanoidModel {
       });
     };
 
-    if (this.documents) {
-      travelNodes(this.documents);
+    if (this.sortedDocuments) {
+      travelNodes(this.sortedDocuments);
     }
 
     return result;
   }
 
   pathToDocument(documentId: string) {
-    let path: NavigationNode[] | undefined;
+    let path: NavigationNode[] | undefined = [];
     const document = this.store.rootStore.documents.get(documentId);
+    if (!document) {
+      return path;
+    }
 
     const travelNodes = (
       nodes: NavigationNode[],
@@ -153,8 +242,8 @@ export default class Collection extends ParanoidModel {
         }
 
         if (
-          document?.parentDocumentId &&
-          node?.id === document?.parentDocumentId
+          document.parentDocumentId &&
+          node.id === document.parentDocumentId
         ) {
           path = [...newPath, document.asNavigationNode];
           return;
@@ -165,25 +254,22 @@ export default class Collection extends ParanoidModel {
     };
 
     if (this.documents) {
-      travelNodes(this.documents, []);
+      travelNodes(this.documents, path);
     }
 
-    return path || [];
+    return path;
   }
 
   @action
-  star = async () => {
-    return this.store.star(this);
-  };
+  star = async () => this.store.star(this);
 
   @action
-  unstar = async () => {
-    return this.store.unstar(this);
-  };
+  unstar = async () => this.store.unstar(this);
 
-  export = () => {
-    return client.get("/collections.export", {
+  export = (format: FileOperationFormat, includeAttachments: boolean) =>
+    client.post("/collections.export", {
       id: this.id,
+      format,
+      includeAttachments,
     });
-  };
 }

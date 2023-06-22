@@ -1,4 +1,4 @@
-import { JobOptions } from "bull";
+import { Job, JobOptions } from "bull";
 import { taskQueue } from "../";
 
 export enum TaskPriority {
@@ -8,22 +8,33 @@ export enum TaskPriority {
   High = 10,
 }
 
+export enum TaskSchedule {
+  Daily = "daily",
+  Hourly = "hourly",
+}
+
 export default abstract class BaseTask<T> {
+  /**
+   * An optional schedule for this task to be run automatically.
+   */
+  static cron: TaskSchedule | undefined;
+
   /**
    * Schedule this task type to be processed asyncronously by a worker.
    *
    * @param props Properties to be used by the task
    * @returns A promise that resolves once the job is placed on the task queue
    */
-  public static schedule<T>(props?: T) {
+  public static schedule<T>(props?: T, options?: JobOptions): Promise<Job> {
     // @ts-expect-error cannot create an instance of an abstract class, we wont
     const task = new this();
+
     return taskQueue.add(
       {
         name: this.name,
         props,
       },
-      task.options
+      { ...options, ...task.options }
     );
   }
 
@@ -33,7 +44,7 @@ export default abstract class BaseTask<T> {
    * @param props Properties to be used by the task
    * @returns A promise that resolves once the task has completed.
    */
-  public abstract perform(props: T): Promise<void>;
+  public abstract perform(props: T): Promise<any>;
 
   /**
    * Job options such as priority and retry strategy, as defined by Bull.

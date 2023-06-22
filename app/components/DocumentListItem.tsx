@@ -6,6 +6,7 @@ import { Link } from "react-router-dom";
 import { CompositeStateReturn, CompositeItem } from "reakit/Composite";
 import styled, { css } from "styled-components";
 import breakpoint from "styled-components-breakpoint";
+import { s } from "@shared/styles";
 import Document from "~/models/Document";
 import Badge from "~/components/Badge";
 import Button from "~/components/Button";
@@ -49,8 +50,8 @@ function DocumentListItem(
   ref: React.RefObject<HTMLAnchorElement>
 ) {
   const { t } = useTranslation();
-  const currentUser = useCurrentUser();
-  const currentTeam = useCurrentTeam();
+  const user = useCurrentUser();
+  const team = useCurrentTeam();
   const [menuOpen, handleMenuOpen, handleMenuClose] = useBoolean();
 
   const {
@@ -70,7 +71,7 @@ function DocumentListItem(
     !!document.title.toLowerCase().includes(highlight.toLowerCase());
   const canStar =
     !document.isDraft && !document.isArchived && !document.isTemplate;
-  const can = usePolicy(currentTeam.id);
+  const can = usePolicy(team);
   const canCollection = usePolicy(document.collectionId);
 
   return (
@@ -96,7 +97,7 @@ function DocumentListItem(
             highlight={highlight}
             dir={document.dir}
           />
-          {document.isBadgedNew && document.createdBy.id !== currentUser.id && (
+          {document.isBadgedNew && document.createdBy.id !== user.id && (
             <Badge yellow>{t("New")}</Badge>
           )}
           {canStar && (
@@ -177,11 +178,11 @@ const Actions = styled(EventBoundary)`
   margin: 8px;
   flex-shrink: 0;
   flex-grow: 0;
+  color: ${s("textSecondary")};
 
   ${NudeButton} {
-    &:hover,
-    &[aria-expanded="true"] {
-      background: ${(props) => props.theme.sidebarControlHoverBackground};
+    &: ${hover}, &[aria-expanded= "true"] {
+      background: ${s("sidebarControlHoverBackground")};
     }
   }
 
@@ -201,6 +202,7 @@ const DocumentLink = styled(Link)<{
   border-radius: 8px;
   max-height: 50vh;
   width: calc(100vw - 8px);
+  cursor: var(--pointer);
 
   &:focus-visible {
     outline: none;
@@ -222,7 +224,7 @@ const DocumentLink = styled(Link)<{
   &:active,
   &:focus,
   &:focus-within {
-    background: ${(props) => props.theme.listItemHoverBackground};
+    background: ${s("listItemHoverBackground")};
 
     ${Actions} {
       opacity: 1;
@@ -231,7 +233,7 @@ const DocumentLink = styled(Link)<{
     ${AnimatedStar} {
       opacity: 0.5;
 
-      &:hover {
+      &:${hover} {
         opacity: 1;
       }
     }
@@ -240,7 +242,7 @@ const DocumentLink = styled(Link)<{
   ${(props) =>
     props.$menuOpen &&
     css`
-      background: ${(props) => props.theme.listItemHoverBackground};
+      background: ${s("listItemHoverBackground")};
 
       ${Actions} {
         opacity: 1;
@@ -261,7 +263,7 @@ const Heading = styled.h3<{ rtl?: boolean }>`
   margin-bottom: 0.25em;
   overflow: hidden;
   white-space: nowrap;
-  color: ${(props) => props.theme.text};
+  color: ${s("text")};
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
     Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
 `;
@@ -279,7 +281,7 @@ const Title = styled(Highlight)`
 
 const ResultContext = styled(Highlight)`
   display: block;
-  color: ${(props) => props.theme.textTertiary};
+  color: ${s("textTertiary")};
   font-size: 14px;
   margin-top: -0.25em;
   margin-bottom: 0.25em;

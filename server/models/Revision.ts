@@ -1,4 +1,4 @@
-import { FindOptions } from "sequelize";
+import { Op, SaveOptions } from "sequelize";
 import {
   DataType,
   BelongsTo,
@@ -6,14 +6,15 @@ import {
   DefaultScope,
   ForeignKey,
   Table,
+  IsNumeric,
+  Length as SimpleLength,
 } from "sequelize-typescript";
-import MarkdownSerializer from "slate-md-serializer";
+import { DocumentValidation } from "@shared/validations";
 import Document from "./Document";
 import User from "./User";
-import BaseModel from "./base/BaseModel";
+import IdModel from "./base/IdModel";
 import Fix from "./decorators/Fix";
-
-const serializer = new MarkdownSerializer();
+import Length from "./validators/Length";
 
 @DefaultScope(() => ({
   include: [
@@ -26,13 +27,22 @@ const serializer = new MarkdownSerializer();
 }))
 @Table({ tableName: "revisions", modelName: "revision" })
 @Fix
-class Revision extends BaseModel {
+class Revision extends IdModel {
+  @IsNumeric
   @Column(DataType.SMALLINT)
   version: number;
 
+  @SimpleLength({
+    max: 255,
+    msg: `editorVersion must be 255 characters or less`,
+  })
   @Column
   editorVersion: string;
 
+  @Length({
+    max: DocumentValidation.maxTitleLength,
+    msg: `Revision title must be ${DocumentValidation.maxTitleLength} characters or less`,
+  })
   @Column
   title: string;
 
@@ -64,54 +74,41 @@ class Revision extends BaseModel {
     });
   }
 
-  static createFromDocument(
-    document: Document,
-    options?: FindOptions<Revision>
-  ) {
-    return this.create(
-      {
-        title: document.title,
-        text: document.text,
-        userId: document.lastModifiedById,
-        editorVersion: document.editorVersion,
-        version: document.version,
-        documentId: document.id,
-        // revision time is set to the last time document was touched as this
-        // handler can be debounced in the case of an update
-        createdAt: document.updatedAt,
-      },
-      options
-    );
+  static buildFromDocument(document: Document) {
+    return this.build({
+      title: document.title,
+      text: document.text,
+      userId: document.lastModifiedById,
+      editorVersion: document.editorVersion,
+      version: document.version,
+      documentId: document.id,
+      // revision time is set to the last time document was touched as this
+      // handler can be debounced in the case of an update
+      createdAt: document.updatedAt,
+    });
   }
 
-  migrateVersion = function () {
-    let migrated = false;
+  static createFromDocument(
+    document: Document,
+    options?: SaveOptions<Revision>
+  ) {
+    const revision = this.buildFromDocument(document);
+    return revision.save(options);
+  }
 
-    // migrate from document version 0 -> 1
-    if (!this.version) {
-      // removing the title from the document text attribute
-      this.text = this.text.replace(/^#\s(.*)\n/, "");
-      this.version = 1;
-      migrated = true;
-    }
+  // instance methods
 
-    // migrate from document version 1 -> 2
-    if (this.version === 1) {
-      const nodes = serializer.deserialize(this.text);
-      this.text = serializer.serialize(nodes, {
-        version: 2,
-      });
-      this.version = 2;
-      migrated = true;
-    }
-
-    if (migrated) {
-      return this.save({
-        silent: true,
-        hooks: false,
-      });
-    }
-  };
+  previous(): Promise<Revision | null> {
+    return (this.constructor as typeof Revision).findOne({
+      where: {
+        documentId: this.documentId,
+        createdAt: {
+          [Op.lt]: this.createdAt,
+        },
+      },
+      order: [["createdAt", "DESC"]],
+    });
+  }
 }
 
 export default Revision;
